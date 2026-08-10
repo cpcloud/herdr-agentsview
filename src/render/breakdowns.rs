@@ -85,6 +85,9 @@ fn render_category(
     has_divider: bool,
     palette: Palette,
 ) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let selected = app.breakdown_category() == category;
     let marked = selected && app.focus() == Focus::Breakdowns;
     let marker = if marked { ">" } else { " " };
@@ -109,6 +112,11 @@ fn render_category(
         buffer,
     );
 
+    let row_width = area.width.saturating_sub(1);
+    if row_width == 0 {
+        return;
+    }
+
     let rows = rows(app, category);
     let maximum = rows
         .iter()
@@ -124,10 +132,10 @@ fn render_category(
             row,
             app.breakdown_value(),
             maximum,
-            usize::from(area.width).saturating_sub(1),
+            usize::from(row_width),
             palette,
         );
-        Paragraph::new(line).render(Rect::new(area.x + 1, y, area.width - 1, 1), buffer);
+        Paragraph::new(line).render(Rect::new(area.x + 1, y, row_width, 1), buffer);
     }
 }
 
@@ -238,10 +246,45 @@ fn category_name(category: BreakdownCategory) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::breakdown_line;
-    use crate::app::{BreakdownValue, ColorMode};
+    use std::time::Duration;
+
+    use chrono::NaiveDate;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    use super::{breakdown_line, render_category};
+    use crate::app::{App, BreakdownCategory, BreakdownValue, ColorMode};
     use crate::render::style::Palette;
-    use crate::wire::{KeyMinutes, Money};
+    use crate::wire::{KeyMinutes, Money, Report, ReportSelection};
+
+    #[test]
+    fn zero_width_category_column_does_not_panic() {
+        // If a future layout sends more breakdown columns than available cells, rendering a
+        // populated zero-width column must not underflow before the layout can recover.
+        let report: Report =
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json")).unwrap();
+        let selection = ReportSelection::new(
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            report.timezone,
+        );
+        let mut app = App::new(selection, Duration::from_secs(300));
+        let request = app.begin_foreground_load();
+        app.apply_report(
+            request.generation,
+            Ok(Box::new(report)),
+            "2026-08-08T17:21:00Z".parse().unwrap(),
+        );
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 2));
+
+        render_category(
+            &mut buffer,
+            Rect::new(0, 0, 0, 2),
+            &app,
+            BreakdownCategory::Project,
+            false,
+            Palette::new(ColorMode::Color),
+        );
+    }
 
     #[test]
     fn minute_breakdowns_compact_only_values_at_least_one_thousand() {
