@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, SystemTime};
 
@@ -11,7 +12,8 @@ use crate::config::PluginConfig;
 use crate::wire::{Automation, ReportSelection};
 
 use super::{
-    safe_excerpt, ActivityClient, ApiErrorKind, MAX_ERROR_BODY_BYTES, MAX_SUCCESS_BODY_BYTES,
+    safe_contract_path, safe_excerpt, ActivityClient, ApiErrorKind, MAX_ERROR_BODY_BYTES,
+    MAX_SUCCESS_BODY_BYTES,
 };
 
 mod http;
@@ -473,6 +475,21 @@ async fn same_version_nested_shape_error_identifies_the_contract_path() {
     assert!(rendered.contains("pricing.models[*].resolutions[0].bands"));
     assert!(!rendered.contains("model-alpha"));
     assert!(!rendered.contains("not-a-list"));
+}
+
+#[test]
+fn contract_path_redaction_does_not_cross_sequence_boundaries() {
+    // If the dynamic-map marker survives a sequence segment, a later ordinary field is
+    // needlessly redacted and the schema mismatch loses its useful location.
+    let body = br#"{"models":[{"field":"not-a-boolean"}]}"#;
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let error =
+        serde_path_to_error::deserialize::<_, BTreeMap<String, Vec<BTreeMap<String, bool>>>>(
+            &mut deserializer,
+        )
+        .unwrap_err();
+
+    assert_eq!(safe_contract_path(error.path()), "models[0].field");
 }
 
 #[tokio::test]

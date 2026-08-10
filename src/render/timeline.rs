@@ -182,7 +182,7 @@ fn render_chart(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) {
     let Some(report) = app.report() else {
         return;
     };
-    let observed = report.elapsed_bucket_count.min(report.buckets.len());
+    let observed = report.observed_bucket_count();
     let peak = report
         .buckets
         .iter()
@@ -508,6 +508,33 @@ mod tests {
         assert_eq!(app.timeline_cursor(), 1);
         assert_eq!(buffer[(0, area.height - 1)].symbol(), "·");
         assert!(axis.starts_with(&expected_start), "{axis:?}");
+    }
+
+    #[test]
+    fn complete_report_renders_every_bucket_even_with_a_stale_elapsed_count() {
+        // If the partial-only cutoff leaks into a complete report, a valid tail bucket is
+        // rendered as future data while the rest of the dashboard describes a complete day.
+        let mut report = fixture_report();
+        report.partial = false;
+        report.elapsed_bucket_count = 1;
+        report.buckets[0].interactive_at_peak = 0;
+        report.buckets[0].automated_at_peak = 0;
+        report.buckets[1].interactive_at_peak = 3;
+        let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
+        let mut app = App::new(selection, Duration::from_secs(300));
+        let request = app.begin_foreground_load();
+        app.apply_report(
+            request.generation,
+            Ok(Box::new(report)),
+            "2026-08-08T17:21:00Z".parse().unwrap(),
+        );
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+
+        render_chart(&mut buffer, area, &app, Palette::new(ColorMode::Monochrome));
+
+        assert_eq!(buffer[(0, 0)].symbol(), "·");
+        assert_eq!(buffer[(1, 0)].symbol(), "█");
     }
 
     #[test]

@@ -373,14 +373,14 @@ fn safe_excerpt(body: &[u8]) -> String {
 
 fn safe_contract_path(path: &Path) -> String {
     let mut rendered = String::new();
-    let mut redact_map_key = false;
+    let mut redact_next_map_key = false;
     for segment in path {
+        let redact_this_map_key = std::mem::take(&mut redact_next_map_key);
         match segment {
             Segment::Seq { index } => rendered.push_str(&format!("[{index}]")),
             Segment::Map { key } => {
-                if redact_map_key {
+                if redact_this_map_key {
                     rendered.push_str("[*]");
-                    redact_map_key = false;
                     continue;
                 }
                 if !rendered.is_empty() {
@@ -388,7 +388,7 @@ fn safe_contract_path(path: &Path) -> String {
                 }
                 rendered.push_str(&safe_excerpt(key.as_bytes()));
                 // Keep this list aligned with dynamic-key maps in the wire contract.
-                redact_map_key = matches!(key.as_str(), "models" | "projects");
+                redact_next_map_key = matches!(key.as_str(), "models" | "projects");
             }
             Segment::Enum { variant } => {
                 if !rendered.is_empty() {

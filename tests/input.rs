@@ -357,6 +357,20 @@ fn in_flight_report_does_not_advertise_an_inert_refresh() {
 }
 
 #[test]
+fn unavailable_timeline_does_not_advertise_an_inert_slice() {
+    // If initial loading advertises Enter, the footer promises session slicing while the
+    // input handler correctly leaves timeline inspection disabled without report buckets.
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.set_focus(Focus::Timeline);
+
+    let hints = app.contextual_keys();
+
+    assert!(!hints.iter().any(|hint| hint.key == "Enter"));
+    app.handle_input(InputKey::Enter, today());
+    assert!(!app.timeline_inspection_active());
+}
+
+#[test]
 fn stale_report_advertises_retry_consistently() {
     // If the stale header and footer name different actions for the same key, recovery copy is
     // internally contradictory even though both paths issue the same request.

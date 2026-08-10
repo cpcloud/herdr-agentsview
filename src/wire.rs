@@ -157,12 +157,16 @@ pub struct Report {
 }
 
 impl Report {
-    pub(crate) fn first_activity_bucket_index(&self) -> usize {
-        let observed = if self.partial {
+    pub(crate) fn observed_bucket_count(&self) -> usize {
+        if self.partial {
             self.elapsed_bucket_count.min(self.buckets.len())
         } else {
             self.buckets.len()
-        };
+        }
+    }
+
+    pub(crate) fn first_activity_bucket_index(&self) -> usize {
+        let observed = self.observed_bucket_count();
         self.buckets
             .iter()
             .take(observed)

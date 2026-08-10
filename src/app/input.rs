@@ -120,7 +120,14 @@ impl App {
                 hint("←/→", "bucket", "←/→ bucket"),
                 hint("Enter", "all sessions", "Enter all"),
             ],
-            Focus::Timeline => vec![hint("Enter", "slice sessions", "Enter slice")],
+            Focus::Timeline
+                if self
+                    .report()
+                    .is_some_and(|report| !report.buckets.is_empty()) =>
+            {
+                vec![hint("Enter", "slice sessions", "Enter slice")]
+            }
+            Focus::Timeline => Vec::new(),
             Focus::Sessions => vec![
                 hint("←/→", "sort field", "←/→ sort"),
                 hint("↑/↓", "select row", "↑/↓ row"),
