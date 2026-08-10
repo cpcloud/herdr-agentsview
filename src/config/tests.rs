@@ -157,6 +157,20 @@ fn missing_or_unknown_config_is_not_replaced_with_defaults() {
 }
 
 #[test]
+fn malformed_config_errors_do_not_echo_source_lines() {
+    // If a credential is mistakenly placed in the TOML file, parse diagnostics must not
+    // copy the offending line into terminal output or a persistent Herdr pane.
+    let credential = generated_credential();
+    let fixture = ConfigFixture::with_config(&format!("{VALID_CONFIG}\ntoken = {credential:?}\n"));
+
+    let error = PluginConfig::load_from(&fixture.environment).unwrap_err();
+    let rendered = format!("{error:#}");
+
+    assert!(rendered.contains("parse Activity config"));
+    assert!(!rendered.contains(&credential), "{rendered}");
+}
+
+#[test]
 fn unsafe_base_url_components_are_rejected() {
     // If URL credentials, queries, or fragments survive validation, fixed endpoint joins
     // can send requests to an ambiguous origin or leak credentials into diagnostics.

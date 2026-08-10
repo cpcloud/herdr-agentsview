@@ -76,6 +76,10 @@ impl PluginConfig {
         let contents = fs::read_to_string(&config_path)
             .with_context(|| format!("read Activity config {}", config_path.display()))?;
         let raw: RawConfig = toml::from_str(&contents)
+            .map_err(|mut error| {
+                error.set_input(None);
+                error
+            })
             .with_context(|| format!("parse Activity config {}", config_path.display()))?;
         if raw.request_timeout_seconds == Some(0) {
             bail!("request_timeout_seconds must be greater than zero");
