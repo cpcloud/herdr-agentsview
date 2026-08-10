@@ -18,7 +18,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::api::ActivityClient;
-use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportRequest, RuntimeEvent};
+use crate::app::{
+    App, AppCommand, InputKey, MetadataKind, ReportRequest, ReportState, RuntimeEvent,
+};
 use crate::config::PluginConfig;
 use crate::render::{self, TerminalCapabilities};
 use crate::wire::ReportSelection;
@@ -306,15 +308,19 @@ fn run_loop(
     runtime: &mut Runtime,
     timezone: chrono_tz::Tz,
 ) -> anyhow::Result<()> {
+    let mut redraw_requested = true;
     loop {
-        runtime.drain_events(app);
+        redraw_requested |= runtime.drain_events(app) > 0;
         runtime.tick(app, Instant::now())?;
-        terminal
-            .draw(|frame| {
-                let plan = synchronize_layout(app, frame.area());
-                render::draw(frame, app, &plan);
-            })
-            .context("draw Activity dashboard")?;
+        if redraw_required(app, redraw_requested) {
+            terminal
+                .draw(|frame| {
+                    let plan = synchronize_layout(app, frame.area());
+                    render::draw(frame, app, &plan);
+                })
+                .context("draw Activity dashboard")?;
+            redraw_requested = false;
+        }
 
         if !event::poll(INPUT_POLL_INTERVAL).context("poll terminal input")? {
             continue;
@@ -326,12 +332,21 @@ fn run_loop(
                     if runtime.dispatch_all(app.handle_input(input, today)) {
                         return Ok(());
                     }
+                    redraw_requested = true;
                 }
             }
-            Event::Resize(_, _) => {}
+            Event::Resize(_, _) => redraw_requested = true,
             _ => {}
         }
     }
+}
+
+fn redraw_required(app: &App, state_changed: bool) -> bool {
+    state_changed
+        || matches!(
+            app.report_state(),
+            ReportState::InitialLoading { .. } | ReportState::Refreshing { .. }
+        )
 }
 
 fn synchronize_layout(app: &mut App, area: Rect) -> render::FramePlan {
@@ -436,7 +451,7 @@ mod tests {
     use crate::app::{App, InputKey};
     use crate::wire::{Report, ReportSelection};
 
-    use super::{map_key, no_color_requested, synchronize_layout};
+    use super::{map_key, no_color_requested, redraw_required, synchronize_layout};
 
     #[test]
     fn empty_no_color_value_keeps_terminal_colors_enabled() {
@@ -448,9 +463,43 @@ mod tests {
     }
 
     #[test]
+    fn ready_dashboard_does_not_request_an_idle_redraw() {
+        // If an unchanged ready dashboard redraws on every input poll, large day reports are
+        // repeatedly sorted and recolored while the terminal is idle.
+        let app = ready_app();
+
+        assert!(!redraw_required(&app, false));
+        assert!(redraw_required(&app, true));
+    }
+
+    #[test]
+    fn loading_dashboard_keeps_requesting_spinner_frames() {
+        // If idle-frame suppression also stops loading frames, the one visible Braille
+        // spinner freezes while an Activity request is in flight.
+        let selection = ReportSelection::new(
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            "America/New_York".parse().unwrap(),
+        );
+        let mut app = App::new(selection, Duration::from_secs(300));
+        app.begin_foreground_load();
+
+        assert!(redraw_required(&app, false));
+    }
+
+    #[test]
     fn layout_synchronization_keeps_session_scroll_inside_the_rendered_viewport() {
         // If TUI orchestration never publishes its viewport to the app, keyboard scrolling
         // keeps using the previous pane height and can leave the selected row off-screen.
+        let mut app = ready_app();
+        app.move_session(2, 1);
+        assert_eq!(app.session_scroll(), 2);
+
+        synchronize_layout(&mut app, Rect::new(0, 0, 200, 50));
+
+        assert_eq!(app.session_scroll(), 0);
+    }
+
+    fn ready_app() -> App {
         let selection = ReportSelection::new(
             NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
             "America/New_York".parse().unwrap(),
@@ -464,12 +513,7 @@ mod tests {
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
-        app.move_session(2, 1);
-        assert_eq!(app.session_scroll(), 2);
-
-        synchronize_layout(&mut app, Rect::new(0, 0, 200, 50));
-
-        assert_eq!(app.session_scroll(), 0);
+        app
     }
 
     #[test]
