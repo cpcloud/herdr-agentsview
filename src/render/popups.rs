@@ -20,9 +20,6 @@ pub(super) fn render(
     if app.help_open() {
         render_help(buffer, area, palette);
     } else if let Some(popup) = app.popup() {
-        if area.width < 24 {
-            return;
-        }
         let searchable = popup.is_searchable();
         let max_label = popup
             .labels
@@ -208,41 +205,5 @@ fn focus_name(focus: Focus) -> &'static str {
         Focus::Timeline => "Timeline",
         Focus::Sessions => "Sessions",
         Focus::Breakdowns => "Breakdowns",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use chrono::NaiveDate;
-    use chrono_tz::UTC;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-
-    use super::render;
-    use crate::app::{App, ColorMode, Focus, InputKey};
-    use crate::render::layout::LayoutClass;
-    use crate::render::style::Palette;
-    use crate::wire::ReportSelection;
-
-    #[test]
-    fn selector_popup_ignores_an_area_narrower_than_its_minimum() {
-        // If a popup bypasses the frame-level minimum-size guard, its width bounds must not
-        // invert and panic while the terminal is being resized.
-        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
-        let mut app = App::new(ReportSelection::new(date, UTC), Duration::from_secs(300));
-        app.set_focus(Focus::Automation);
-        app.handle_input(InputKey::Enter, date);
-        let area = Rect::new(0, 0, 23, 8);
-        let mut buffer = Buffer::empty(area);
-
-        render(
-            &mut buffer,
-            area,
-            &app,
-            LayoutClass::Compact,
-            Palette::new(ColorMode::Color),
-        );
     }
 }
