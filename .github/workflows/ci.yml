@@ -1,0 +1,58 @@
+---
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - runner: macos-15
+            system: aarch64-darwin
+
+    steps:
+      - name: Harden Linux runner
+        if: runner.os == 'Linux'
+        # v2.20.1
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        # v3.21.9
+        uses: DeterminateSystems/determinate-nix-action@61cbfe2efc2d4e7a8a6d56967c3c1058e846c858
+
+      - name: Build package
+        env:
+          NIX_SYSTEM: ${{ matrix.system }}
+        run: nix build --print-build-logs ".#checks.${NIX_SYSTEM}.package"
+
+      - name: Check synthetic demo isolation
+        env:
+          NIX_SYSTEM: ${{ matrix.system }}
+        run: nix build --print-build-logs ".#checks.${NIX_SYSTEM}.demo"
+
+      - name: Run repository hooks
+        env:
+          NIX_SYSTEM: ${{ matrix.system }}
+        run: nix build --print-build-logs ".#checks.${NIX_SYSTEM}.pre-commit"

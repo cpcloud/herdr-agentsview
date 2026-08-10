@@ -24,8 +24,12 @@ git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
     shfmt.enable = true;
     statix.enable = true;
     trim-trailing-whitespace.enable = true;
-    yamllint.enable = true;
     zizmor.enable = true;
+
+    yamllint = {
+      enable = true;
+      settings.configData = "{extends: default, rules: {line-length: {max: 120}, truthy: {check-keys: false}}}";
+    };
 
     clippy = {
       enable = true;
