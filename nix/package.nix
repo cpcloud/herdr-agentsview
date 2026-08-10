@@ -9,7 +9,7 @@
 }:
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "herdr-agentsview";
-  version = "0.1.0";
+  version = (lib.importTOML ../Cargo.toml).package.version;
 
   src = lib.fileset.toSource {
     root = ../.;
@@ -41,7 +41,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
     plugin_root="$out/share/herdr/plugins/local-agentsview"
     mkdir -p "$plugin_root"
     substitute ${../herdr-plugin.toml.in} "$plugin_root/herdr-plugin.toml" \
-      --replace-fail '@HERDR_AGENTSVIEW@' "$out/bin/herdr-agentsview"
+      --replace-fail '@HERDR_AGENTSVIEW@' "$out/bin/herdr-agentsview" \
+      --replace-fail '@VERSION@' '${finalAttrs.version}'
   '';
 
   postFixup = ''

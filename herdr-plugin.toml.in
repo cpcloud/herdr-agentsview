@@ -1,6 +1,6 @@
 id = "local.agentsview"
 name = "AgentsView"
-version = "0.1.0"
+version = "@VERSION@"
 min_herdr_version = "0.7.4"
 description = "Inspect AgentsView activity from Herdr"
 platforms = ["linux", "macos"]
