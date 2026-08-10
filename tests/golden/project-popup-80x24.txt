@@ -1,0 +1,24 @@
+AgentsView                                                       Updated 12s ago
+Date 2026-08-08 · Proj project-30 · Agent All · Host All · Session All
+┌ Summary ────────┌ Project ─────────────┐─────────────────────────────────────┐
+│Concurrent agents│Search: type to filter│e  Active 25m · Idle 5m              │
+│Work  30 agent-mi│  project-13          │  3 projects · 3 models              │
+│Sessions  3 total│  project-14          │timed                                │
+└─────────────────│  project-15          │─────────────────────────────────────┘
+┌ Concurrent agent│  project-16          │─────────────────────────────────────┐
+│I Interactive  A │  project-17          │ro                                   │
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│  project-18          │█████████████████████████████████████│
+│13:00            │  project-19          │                                13:30│
+└─────────────────│  project-20          │─────────────────────────────────────┘
+Sections:  s  Sess│  project-21          │m/a  category
+┌ Sessions (3 tota│  project-22          │─────────────────────────────────────┐
+│  Session        │  project-23          │                    Min↓    Cost     │
+│  Dashboard work │  project-24          │-alpha              20      $3.00    │
+│  Review activity│  project-25          │-beta               10      $2.00    │
+│  Imported activi│  project-26          │-gamma              untimed $1.50    │
+│                 │  project-27          │                                     │
+│                 │  project-28          │                                     │
+│                 │  project-29          │                                     │
+│Model: model-alph│  project-30          │w: 13:00–13:20                       │
+└─────────────────└──────────────────────┘─────────────────────────────────────┘
+ A-Z  search  Bksp  erase  ↑/↓  choose  Enter  apply  Esc  cancel

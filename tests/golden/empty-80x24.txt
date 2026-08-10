@@ -1,0 +1,24 @@
+AgentsView                                                       Updated 12s ago
+Date 2026-08-08 · Proj All · Agent All · Host All · Session All
+┌ Summary ─────────────────────────────────────────────────────────────────────┐
+│Concurrent agents  Peak 0 @ —  │  Time  Active 0m · Idle 24h                  │
+│Work  0 agent-min · $0.00 cost  │  Scope  0 projects · 0 models               │
+│Sessions  0 total · 0 int · 0 auto · 0 untimed                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌ Concurrent agents ───────────────────────────────────────────────────────────┐
+│I Interactive  A Automated  · observed zero                                   │
+│··············································································│
+│00:00                               12:00                                00:00│
+└──────────────────────────────────────────────────────────────────────────────┘
+Sections:  s  Sessions   b  Breakdown   p/m/a  category
+┌ Sessions (0 total) · Sort: Agent-min↓ ───────────────────────────────────────┐
+│No activity for 2026-08-08 · move date or clear filters                       │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ←/→  day  Bksp  today  Tab  next  r  refresh  ?  keys  q  quit

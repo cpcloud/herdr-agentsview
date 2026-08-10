@@ -1,0 +1,357 @@
+{
+  "schema_version": 5,
+  "pricing": {
+    "source": "custom+embedded",
+    "table_version": "2026-08-01",
+    "latest_row_updated_at": null,
+    "custom_override_count": 1,
+    "effective_row_count": 3,
+    "digest": "sha256:fixture",
+    "cost_source": "mixed",
+    "fallback": {
+      "used": true,
+      "models": [
+        "model-beta",
+        "model-gamma"
+      ]
+    },
+    "models": {
+      "model-alpha": {
+        "cost_source": "reported",
+        "resolutions": [
+          {
+            "priced_model": "model-alpha",
+            "matched_pattern": null,
+            "input_cost_per_mtok": {
+              "microdollars": 3000000
+            },
+            "output_cost_per_mtok": {
+              "microdollars": 15000000
+            },
+            "cache_write_cost_per_mtok": {
+              "microdollars": 3750000
+            },
+            "cache_read_cost_per_mtok": {
+              "microdollars": 300000
+            },
+            "cost_source": "computed",
+            "bands": [
+              {
+                "above_input_tokens": 200000,
+                "input_cost_per_mtok": {
+                  "microdollars": 6000000
+                },
+                "output_cost_per_mtok": {
+                  "microdollars": 22500000
+                },
+                "cache_write_cost_per_mtok": {
+                  "microdollars": 7500000
+                },
+                "cache_read_cost_per_mtok": {
+                  "microdollars": 600000
+                }
+              }
+            ],
+            "application": {
+              "base_request_count": 2,
+              "aggregate_row_count": 1,
+              "bands": [
+                {
+                  "above_input_tokens": 200000,
+                  "request_count": 3
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "projects": {
+    "pl1-alpha": {
+      "display_label": "project-alpha",
+      "resolution": "resolved",
+      "identity": {
+        "key": "pl1-alpha",
+        "kind": "git_remote",
+        "normalized_remote": "https://example.invalid/project-alpha",
+        "root_key": "root-alpha",
+        "repository_key": "repo-alpha"
+      }
+    },
+    "pl1-beta": {
+      "display_label": "project-beta",
+      "resolution": "unknown"
+    },
+    "pl1-gamma": {
+      "display_label": "project-gamma",
+      "resolution": "ambiguous"
+    }
+  },
+  "timezone": "America/New_York",
+  "range_start": "2026-08-08T17:00:00Z",
+  "range_end": "2026-08-08T17:30:00Z",
+  "bucket_unit": "minute",
+  "bucket_seconds": 900,
+  "bucket_count": 2,
+  "partial": true,
+  "as_of": "2026-08-08T17:20:00Z",
+  "effective_end": "2026-08-08T17:20:00Z",
+  "elapsed_bucket_count": 2,
+  "buckets": [
+    {
+      "start": "2026-08-08T17:00:00Z",
+      "end": "2026-08-08T17:15:00Z",
+      "max_agents": 2,
+      "agent_minutes": 25.0,
+      "output_tokens": 400,
+      "cost": {
+        "microdollars": 3000000
+      },
+      "automated_at_peak": 1,
+      "interactive_at_peak": 1
+    },
+    {
+      "start": "2026-08-08T17:15:00Z",
+      "end": "2026-08-08T17:30:00Z",
+      "max_agents": 1,
+      "agent_minutes": 5.0,
+      "output_tokens": 250,
+      "cost": {
+        "microdollars": 3500000
+      },
+      "automated_at_peak": 0,
+      "interactive_at_peak": 1
+    }
+  ],
+  "peak": {
+    "agents": 2,
+    "at": "2026-08-08T17:05:00Z"
+  },
+  "totals": {
+    "active_minutes": 25.0,
+    "idle_minutes": 5.0,
+    "agent_minutes": 30.0,
+    "sessions": 3,
+    "untimed_sessions": 1,
+    "distinct_projects": 3,
+    "distinct_models": 3,
+    "output_tokens": 650,
+    "cost": {
+      "microdollars": 6500000
+    },
+    "automated_agent_minutes": 10.0,
+    "interactive_agent_minutes": 20.0,
+    "automated_cost": {
+      "microdollars": 2000000
+    },
+    "interactive_cost": {
+      "microdollars": 4500000
+    },
+    "automated_sessions": 1,
+    "interactive_sessions": 2
+  },
+  "by_project": [
+    {
+      "project_key": "pl1-alpha",
+      "key": "project-alpha",
+      "agent_minutes": 20.0,
+      "cost": {
+        "microdollars": 3000000
+      },
+      "automated_agent_minutes": 0.0,
+      "interactive_agent_minutes": 20.0,
+      "automated_cost": {
+        "microdollars": 0
+      },
+      "interactive_cost": {
+        "microdollars": 3000000
+      }
+    },
+    {
+      "project_key": "pl1-beta",
+      "key": "project-beta",
+      "agent_minutes": 10.0,
+      "cost": {
+        "microdollars": 2000000
+      },
+      "automated_agent_minutes": 10.0,
+      "interactive_agent_minutes": 0.0,
+      "automated_cost": {
+        "microdollars": 2000000
+      },
+      "interactive_cost": {
+        "microdollars": 0
+      }
+    },
+    {
+      "project_key": "pl1-gamma",
+      "key": "project-gamma",
+      "agent_minutes": 0.0,
+      "cost": {
+        "microdollars": 1500000
+      },
+      "automated_agent_minutes": 0.0,
+      "interactive_agent_minutes": 0.0,
+      "automated_cost": {
+        "microdollars": 0
+      },
+      "interactive_cost": {
+        "microdollars": 1500000
+      }
+    }
+  ],
+  "by_model": [
+    {
+      "key": "model-alpha",
+      "agent_minutes": 20.0,
+      "cost": {
+        "microdollars": 3000000
+      },
+      "automated_agent_minutes": 0.0,
+      "interactive_agent_minutes": 20.0,
+      "automated_cost": {
+        "microdollars": 0
+      },
+      "interactive_cost": {
+        "microdollars": 3000000
+      }
+    },
+    {
+      "key": "model-beta",
+      "agent_minutes": 10.0,
+      "cost": {
+        "microdollars": 2000000
+      },
+      "automated_agent_minutes": 10.0,
+      "interactive_agent_minutes": 0.0,
+      "automated_cost": {
+        "microdollars": 2000000
+      },
+      "interactive_cost": {
+        "microdollars": 0
+      }
+    },
+    {
+      "key": "model-gamma",
+      "agent_minutes": 0.0,
+      "cost": {
+        "microdollars": 1500000
+      },
+      "automated_agent_minutes": 0.0,
+      "interactive_agent_minutes": 0.0,
+      "automated_cost": {
+        "microdollars": 0
+      },
+      "interactive_cost": {
+        "microdollars": 1500000
+      }
+    }
+  ],
+  "by_agent": [
+    {
+      "key": "codex",
+      "agent_minutes": 20.0,
+      "cost": {
+        "microdollars": 4500000
+      },
+      "automated_agent_minutes": 0.0,
+      "interactive_agent_minutes": 20.0,
+      "automated_cost": {
+        "microdollars": 0
+      },
+      "interactive_cost": {
+        "microdollars": 4500000
+      }
+    },
+    {
+      "key": "reviewer",
+      "agent_minutes": 10.0,
+      "cost": {
+        "microdollars": 2000000
+      },
+      "automated_agent_minutes": 10.0,
+      "interactive_agent_minutes": 0.0,
+      "automated_cost": {
+        "microdollars": 2000000
+      },
+      "interactive_cost": {
+        "microdollars": 0
+      }
+    }
+  ],
+  "by_session": [
+    {
+      "session_id": "session-alpha",
+      "project_key": "pl1-alpha",
+      "title": "Implement activity view",
+      "project": "project-alpha",
+      "agent": "codex",
+      "primary_model": "model-alpha",
+      "models": [
+        "model-alpha"
+      ],
+      "agent_minutes": 20.0,
+      "cost": {
+        "microdollars": 3000000
+      },
+      "output_tokens": 300,
+      "first_active": "2026-08-08T17:00:00Z",
+      "last_active": "2026-08-08T17:20:00Z",
+      "timing_quality": "timed",
+      "is_automated": false
+    },
+    {
+      "session_id": "session-beta",
+      "project_key": "pl1-beta",
+      "title": "Review activity view",
+      "project": "project-beta",
+      "agent": "reviewer",
+      "primary_model": "model-beta",
+      "models": [
+        "model-beta"
+      ],
+      "agent_minutes": 10.0,
+      "cost": {
+        "microdollars": 2000000
+      },
+      "output_tokens": 200,
+      "first_active": "2026-08-08T17:05:00Z",
+      "last_active": "2026-08-08T17:15:00Z",
+      "timing_quality": "timed",
+      "is_automated": true
+    },
+    {
+      "session_id": "session-gamma",
+      "project_key": "pl1-gamma",
+      "title": "Imported activity",
+      "project": "project-gamma",
+      "agent": "codex",
+      "primary_model": "model-gamma",
+      "models": [
+        "model-gamma"
+      ],
+      "agent_minutes": null,
+      "cost": {
+        "microdollars": 1500000
+      },
+      "output_tokens": 150,
+      "first_active": null,
+      "last_active": null,
+      "timing_quality": "untimed",
+      "is_automated": false
+    }
+  ],
+  "intervals": [
+    {
+      "session_id": "session-alpha",
+      "start": "2026-08-08T17:00:00Z",
+      "end": "2026-08-08T17:20:00Z"
+    },
+    {
+      "session_id": "session-beta",
+      "start": "2026-08-08T17:05:00Z",
+      "end": "2026-08-08T17:15:00Z"
+    }
+  ]
+}

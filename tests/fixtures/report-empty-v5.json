@@ -1,0 +1,73 @@
+{
+  "schema_version": 5,
+  "pricing": null,
+  "projects": {},
+  "timezone": "America/New_York",
+  "range_start": "2026-08-08T17:00:00Z",
+  "range_end": "2026-08-08T17:30:00Z",
+  "bucket_unit": "minute",
+  "bucket_seconds": 900,
+  "bucket_count": 2,
+  "partial": true,
+  "as_of": "2026-08-08T17:20:00Z",
+  "effective_end": "2026-08-08T17:20:00Z",
+  "elapsed_bucket_count": 2,
+  "buckets": [
+    {
+      "start": "2026-08-08T17:00:00Z",
+      "end": "2026-08-08T17:15:00Z",
+      "max_agents": 0,
+      "agent_minutes": 0.0,
+      "output_tokens": 0,
+      "cost": {
+        "microdollars": 0
+      },
+      "automated_at_peak": 0,
+      "interactive_at_peak": 0
+    },
+    {
+      "start": "2026-08-08T17:15:00Z",
+      "end": "2026-08-08T17:30:00Z",
+      "max_agents": 0,
+      "agent_minutes": 0.0,
+      "output_tokens": 0,
+      "cost": {
+        "microdollars": 0
+      },
+      "automated_at_peak": 0,
+      "interactive_at_peak": 0
+    }
+  ],
+  "peak": {
+    "agents": 0,
+    "at": null
+  },
+  "totals": {
+    "active_minutes": 0.0,
+    "idle_minutes": 20.0,
+    "agent_minutes": 0.0,
+    "sessions": 0,
+    "untimed_sessions": 0,
+    "distinct_projects": 0,
+    "distinct_models": 0,
+    "output_tokens": 0,
+    "cost": {
+      "microdollars": 0
+    },
+    "automated_agent_minutes": 0.0,
+    "interactive_agent_minutes": 0.0,
+    "automated_cost": {
+      "microdollars": 0
+    },
+    "interactive_cost": {
+      "microdollars": 0
+    },
+    "automated_sessions": 0,
+    "interactive_sessions": 0
+  },
+  "by_project": [],
+  "by_model": [],
+  "by_agent": [],
+  "by_session": [],
+  "intervals": []
+}

@@ -1,0 +1,24 @@
+AgentsView                                                       Updated 12s ago
+Date 2026-08-08 · Proj All · Agent All · Host All · Session All
+┌ Summary ─────────────────────────────────────────────────────────────────────┐
+│Concurrent agents  Peak 7 @ 06:00  │  Time  Active 25m · Idle 5m              │
+│Work  30 agent-min · $6.50 cost  │  Scope  3 projects · 3 models              │
+│Sessions  3 total · 2 int · 1 auto · 1 untimed                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌ Concurrent agents ───────────────────────────────────────────────────────────┐
+│Interactive  Automated  · observed zero                                       │
+│··········███▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄····███▄▄▄▄▄▄▄·····███····▄▄▄▄▄▄▄▄▄▄▄▄▄██··│
+│00:00                               12:00                                00:00│
+└──────────────────────────────────────────────────────────────────────────────┘
+Sections:  s  Sessions   b  Breakdown   p/m/a  category
+┌ Sessions (3 total) · Sort: Agent-min↓ ───────────────────────────────────────┐
+│  Session                         Project                    Min↓    Cost     │
+│  Implement activity view         project-alpha              20      $3.00    │
+│  Review activity view            project-beta               10      $2.00    │
+│  Imported activity               project-gamma              untimed $1.50    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│Model: model-alpha · Agent: codex · Window: 13:00–13:20                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ←/→  day  Bksp  today  Tab  next  r  refresh  ?  keys  q  quit

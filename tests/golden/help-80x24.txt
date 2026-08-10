@@ -1,0 +1,24 @@
+AgentsView                                                       Updated 12s ago
+Date 2026-08-08 · Proj All · Agent All · Host All · Session All
+┌ Summary · through 13:20 ─────────────────────────────────────────────────────┐
+│Conc┌ Keyboard help ─────────────────────────────────────────────────────┐    │
+│Work│NAVIGATION                                                          │    │
+│Sess│ Tab  next section                 Shift-Tab  previous section      │    │
+└────│ ←/→  change / inspect             ↑/↓  move selection              │────┘
+┌ Con│ Enter  choose / slice             Backspace  clear / today         │────┐
+│I In│                                                                    │    │
+│▒▒▒▒│BREAKDOWNS                                                          │┄┄┄┄│
+│13:0│ v  cost ↔ time                    p/m/a  project / model / agent   │3:30│
+└────│                                                                    │────┘
+Secti│COMPACT VIEW                                                        │
+┌ Ses│ s  sessions                       b  breakdowns                    │────┐
+│  Se│                                                                    │    │
+│  Ru│GENERAL                                                             │    │
+│  Re│ r  refresh / retry                Esc  cancel / close              │    │
+│  Im│ ?  close help                     q  close dashboard               │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    └────────────────────────────────────────────────────────────────────┘    │
+│Model: model-alpha · Agent: codex · Window: 13:00–13:20                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Esc  close help  q  quit

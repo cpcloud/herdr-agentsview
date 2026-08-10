@@ -1,0 +1,481 @@
+use std::io;
+use std::time::{Duration, Instant};
+
+use anyhow::Context;
+use chrono::Utc;
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
+use crossterm::style::available_color_count;
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::Terminal;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+
+use crate::api::ActivityClient;
+use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportRequest, RuntimeEvent};
+use crate::config::PluginConfig;
+use crate::render::{self, TerminalCapabilities};
+use crate::wire::ReportSelection;
+
+const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+struct OwnedTask {
+    token: u64,
+    handle: JoinHandle<()>,
+}
+
+enum Completion {
+    Report {
+        generation: u64,
+        event: RuntimeEvent,
+    },
+    Metadata {
+        kind: MetadataKind,
+        token: u64,
+        event: RuntimeEvent,
+    },
+}
+
+pub struct Runtime {
+    client: ActivityClient,
+    sender: mpsc::UnboundedSender<Completion>,
+    receiver: mpsc::UnboundedReceiver<Completion>,
+    report: Option<OwnedTask>,
+    projects: Option<OwnedTask>,
+    agents: Option<OwnedTask>,
+    machines: Option<OwnedTask>,
+    metadata_token: u64,
+    report_timeout_configured: bool,
+    report_wait_intervals: u32,
+    scheduled_supersessions: u32,
+    refresh_interval: Duration,
+    next_refresh: Instant,
+    executor: tokio::runtime::Handle,
+}
+
+impl Runtime {
+    pub fn new(config: &PluginConfig) -> anyhow::Result<Self> {
+        Self::new_at(config, Instant::now())
+    }
+
+    #[doc(hidden)]
+    pub fn new_at(config: &PluginConfig, now: Instant) -> anyhow::Result<Self> {
+        let executor = tokio::runtime::Handle::try_current()
+            .context("Activity request runtime is not running")?;
+        let next_refresh = now
+            .checked_add(config.refresh_interval)
+            .context("refresh interval is too large for the runtime clock")?;
+        let (sender, receiver) = mpsc::unbounded_channel();
+        Ok(Self {
+            client: ActivityClient::new(config)?,
+            sender,
+            receiver,
+            report: None,
+            projects: None,
+            agents: None,
+            machines: None,
+            metadata_token: 0,
+            report_timeout_configured: config.request_timeout.is_some(),
+            report_wait_intervals: 0,
+            scheduled_supersessions: 0,
+            refresh_interval: config.refresh_interval,
+            next_refresh,
+            executor,
+        })
+    }
+
+    pub fn start(&mut self, app: &mut App) {
+        self.dispatch(AppCommand::FetchReport(app.begin_foreground_load()));
+        self.dispatch(AppCommand::FetchMetadata(MetadataKind::Projects));
+        self.dispatch(AppCommand::FetchMetadata(MetadataKind::Agents));
+        self.dispatch(AppCommand::FetchMetadata(MetadataKind::Machines));
+    }
+
+    pub fn dispatch_all(&mut self, commands: impl IntoIterator<Item = AppCommand>) -> bool {
+        for command in commands {
+            if self.dispatch(command) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn dispatch(&mut self, command: AppCommand) -> bool {
+        match command {
+            AppCommand::FetchReport(request) => {
+                self.reset_report_backoff();
+                self.spawn_report(request);
+            }
+            AppCommand::FetchMetadata(kind) => self.spawn_metadata(kind),
+            AppCommand::Quit => return true,
+        }
+        false
+    }
+
+    pub fn tick(&mut self, app: &mut App, now: Instant) -> anyhow::Result<()> {
+        if now < self.next_refresh {
+            return Ok(());
+        }
+        self.next_refresh = now
+            .checked_add(self.refresh_interval)
+            .context("refresh interval exceeds the runtime clock")?;
+        let request = self.scheduled_report_request(app);
+        if let Some(request) = request {
+            self.spawn_report(request);
+        }
+        Ok(())
+    }
+
+    pub fn drain_events(&mut self, app: &mut App) -> usize {
+        let mut applied = 0;
+        while let Ok(completion) = self.receiver.try_recv() {
+            if self.apply_completion(app, completion) {
+                applied += 1;
+            }
+        }
+        applied
+    }
+
+    fn spawn_report(&mut self, request: ReportRequest) {
+        abort_task(&mut self.report);
+        let client = self.client.clone();
+        let sender = self.sender.clone();
+        let generation = request.generation;
+        let handle = self.executor.spawn(async move {
+            let result = client.fetch_report(&request.selection).await.map(Box::new);
+            let _ = sender.send(Completion::Report {
+                generation,
+                event: RuntimeEvent::Report {
+                    generation,
+                    result,
+                    received_at: Utc::now(),
+                },
+            });
+        });
+        self.report = Some(OwnedTask {
+            token: generation,
+            handle,
+        });
+    }
+
+    fn spawn_metadata(&mut self, kind: MetadataKind) {
+        self.metadata_token = self.metadata_token.wrapping_add(1);
+        let token = self.metadata_token;
+        let slot = self.metadata_slot_mut(kind);
+        abort_task(slot);
+        let client = self.client.clone();
+        let sender = self.sender.clone();
+        let handle = self.executor.spawn(async move {
+            let event = match kind {
+                MetadataKind::Projects => RuntimeEvent::Projects(client.fetch_projects().await),
+                MetadataKind::Agents => RuntimeEvent::Agents(client.fetch_agents().await),
+                MetadataKind::Machines => RuntimeEvent::Machines(client.fetch_machines().await),
+            };
+            let _ = sender.send(Completion::Metadata { kind, token, event });
+        });
+        *self.metadata_slot_mut(kind) = Some(OwnedTask { token, handle });
+    }
+
+    fn apply_completion(&mut self, app: &mut App, completion: Completion) -> bool {
+        match completion {
+            Completion::Report { generation, event } => {
+                if self.report.as_ref().map(|task| task.token) != Some(generation) {
+                    return false;
+                }
+                self.report = None;
+                self.reset_report_backoff();
+                app.apply_event(event);
+            }
+            Completion::Metadata { kind, token, event } => {
+                let slot = self.metadata_slot_mut(kind);
+                if slot.as_ref().map(|task| task.token) != Some(token) {
+                    return false;
+                }
+                *slot = None;
+                app.apply_event(event);
+            }
+        }
+        true
+    }
+
+    fn metadata_slot_mut(&mut self, kind: MetadataKind) -> &mut Option<OwnedTask> {
+        match kind {
+            MetadataKind::Projects => &mut self.projects,
+            MetadataKind::Agents => &mut self.agents,
+            MetadataKind::Machines => &mut self.machines,
+        }
+    }
+
+    fn scheduled_report_request(&mut self, app: &mut App) -> Option<ReportRequest> {
+        if self.report.is_none() {
+            self.reset_report_backoff();
+            return app.begin_refresh();
+        }
+        if self.report_timeout_configured {
+            return None;
+        }
+        self.report_wait_intervals = self.report_wait_intervals.saturating_add(1);
+        let required_intervals = 1_u32
+            .checked_shl(self.scheduled_supersessions)
+            .unwrap_or(u32::MAX);
+        if self.report_wait_intervals < required_intervals {
+            return None;
+        }
+        let request = app.supersede_pending_load()?;
+        self.report_wait_intervals = 0;
+        self.scheduled_supersessions = self.scheduled_supersessions.saturating_add(1);
+        Some(request)
+    }
+
+    fn reset_report_backoff(&mut self) {
+        self.report_wait_intervals = 0;
+        self.scheduled_supersessions = 0;
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        abort_task(&mut self.report);
+        abort_task(&mut self.projects);
+        abort_task(&mut self.agents);
+        abort_task(&mut self.machines);
+    }
+}
+
+fn abort_task(task: &mut Option<OwnedTask>) {
+    if let Some(task) = task.take() {
+        task.handle.abort();
+    }
+}
+
+pub fn run(config: PluginConfig) -> anyhow::Result<()> {
+    let executor = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build Activity request runtime")?;
+    let _runtime_context = executor.enter();
+    let today = Utc::now().with_timezone(&config.timezone).date_naive();
+    let mut app = App::new(
+        ReportSelection::new(today, config.timezone),
+        config.refresh_interval,
+    );
+    app.set_color_mode(terminal_capabilities().color_mode());
+    let mut runtime = Runtime::new(&config)?;
+    runtime.start(&mut app);
+    run_terminal(&mut app, &mut runtime, config.timezone)
+}
+
+fn run_terminal(
+    app: &mut App,
+    runtime: &mut Runtime,
+    timezone: chrono_tz::Tz,
+) -> anyhow::Result<()> {
+    enable_raw_mode().context("enable terminal raw mode")?;
+    let mut restore = RestoreTerminal {
+        raw_mode: true,
+        alternate_screen: false,
+        cursor_hidden: false,
+    };
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen).context("enter terminal alternate screen")?;
+    restore.alternate_screen = true;
+    execute!(stdout, Hide).context("hide terminal cursor")?;
+    restore.cursor_hidden = true;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).context("initialize terminal")?;
+    let loop_result = run_loop(&mut terminal, app, runtime, timezone);
+    let cursor_result = terminal.show_cursor().context("restore terminal cursor");
+    if cursor_result.is_ok() {
+        restore.cursor_hidden = false;
+    }
+    drop(terminal);
+    let restore_result = restore.restore().context("restore terminal mode");
+    loop_result.and(cursor_result).and(restore_result)
+}
+
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    runtime: &mut Runtime,
+    timezone: chrono_tz::Tz,
+) -> anyhow::Result<()> {
+    loop {
+        runtime.drain_events(app);
+        runtime.tick(app, Instant::now())?;
+        terminal
+            .draw(|frame| {
+                let plan = synchronize_layout(app, frame.area());
+                render::draw(frame, app, &plan);
+            })
+            .context("draw Activity dashboard")?;
+
+        if !event::poll(INPUT_POLL_INTERVAL).context("poll terminal input")? {
+            continue;
+        }
+        match event::read().context("read terminal input")? {
+            Event::Key(key) if accepts_key_event(key) => {
+                let today = Utc::now().with_timezone(&timezone).date_naive();
+                if let Some(input) = map_key(key) {
+                    if runtime.dispatch_all(app.handle_input(input, today)) {
+                        return Ok(());
+                    }
+                }
+            }
+            Event::Resize(_, _) => {}
+            _ => {}
+        }
+    }
+}
+
+fn synchronize_layout(app: &mut App, area: Rect) -> render::FramePlan {
+    let plan = render::FramePlan::new(app, area);
+    if let Some(visible_rows) = plan.session_viewport_rows() {
+        app.set_session_viewport_rows(visible_rows);
+    }
+    plan
+}
+
+fn accepts_key_event(key: KeyEvent) -> bool {
+    matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+}
+
+fn map_key(key: KeyEvent) -> Option<InputKey> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return Some(InputKey::Quit);
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Tab => Some(InputKey::Tab),
+        KeyCode::BackTab => Some(InputKey::BackTab),
+        KeyCode::Left => Some(InputKey::Left),
+        KeyCode::Right => Some(InputKey::Right),
+        KeyCode::Up => Some(InputKey::Up),
+        KeyCode::Down => Some(InputKey::Down),
+        KeyCode::Enter => Some(InputKey::Enter),
+        KeyCode::Esc => Some(InputKey::Escape),
+        KeyCode::Backspace => Some(InputKey::Backspace),
+        KeyCode::Char(character) => Some(InputKey::Char(character)),
+        _ => None,
+    }
+}
+
+fn terminal_capabilities() -> TerminalCapabilities {
+    TerminalCapabilities {
+        color_count: available_color_count(),
+        no_color: std::env::var_os("NO_COLOR").is_some(),
+        term_is_dumb: std::env::var("TERM").is_ok_and(|term| term == "dumb"),
+    }
+}
+
+struct RestoreTerminal {
+    raw_mode: bool,
+    alternate_screen: bool,
+    cursor_hidden: bool,
+}
+
+impl RestoreTerminal {
+    fn restore(&mut self) -> io::Result<()> {
+        let mut first_error = None;
+        if self.cursor_hidden {
+            if let Err(error) = execute!(io::stdout(), Show) {
+                first_error = Some(error);
+            }
+            self.cursor_hidden = false;
+        }
+        if self.alternate_screen {
+            if let Err(error) = execute!(io::stdout(), LeaveAlternateScreen) {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+            self.alternate_screen = false;
+        }
+        if self.raw_mode {
+            if let Err(error) = disable_raw_mode() {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+            self.raw_mode = false;
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for RestoreTerminal {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use chrono::NaiveDate;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Rect;
+
+    use crate::app::{App, InputKey};
+    use crate::wire::{Report, ReportSelection};
+
+    use super::{map_key, synchronize_layout};
+
+    #[test]
+    fn layout_synchronization_keeps_session_scroll_inside_the_rendered_viewport() {
+        // If TUI orchestration never publishes its viewport to the app, keyboard scrolling
+        // keeps using the previous pane height and can leave the selected row off-screen.
+        let selection = ReportSelection::new(
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            "America/New_York".parse().unwrap(),
+        );
+        let mut app = App::new(selection, Duration::from_secs(300));
+        let request = app.begin_foreground_load();
+        let report: Report =
+            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
+        app.apply_report(
+            request.generation,
+            Ok(Box::new(report)),
+            "2026-08-08T17:21:00Z".parse().unwrap(),
+        );
+        app.move_session(2, 1);
+        assert_eq!(app.session_scroll(), 2);
+
+        synchronize_layout(&mut app, Rect::new(0, 0, 200, 50));
+
+        assert_eq!(app.session_scroll(), 0);
+    }
+
+    #[test]
+    fn modified_character_keys_do_not_trigger_bare_dashboard_actions() {
+        // If modifiers are discarded, common terminal chords silently refresh, switch regions,
+        // or close the pane as though the user pressed the bare character.
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT)),
+            None
+        );
+    }
+
+    #[test]
+    fn control_c_remains_a_conventional_terminal_exit() {
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Some(InputKey::Quit)
+        );
+    }
+}
