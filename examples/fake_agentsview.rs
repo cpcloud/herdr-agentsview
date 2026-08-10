@@ -10,7 +10,7 @@ use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use clap::Parser;
-use herdr_agentsview::wire::{AgentInfo, ProjectInfo, Report};
+use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -209,6 +209,7 @@ fn scenario_report(query: &BTreeMap<String, String>) -> anyhow::Result<Report> {
     let mut report: Report =
         serde_json::from_str(fixture).context("decode committed Activity report scenario")?;
     align_report_date(&mut report, query.get("date"), query.get("timezone"))?;
+    expand_report_to_local_day(&mut report)?;
     Ok(report)
 }
 
@@ -302,6 +303,90 @@ fn align_report_date(
     Ok(())
 }
 
+fn expand_report_to_local_day(report: &mut Report) -> anyhow::Result<()> {
+    if report.bucket_seconds == 0 {
+        bail!("fake report bucket_seconds must be greater than zero");
+    }
+    let date = report
+        .range_start
+        .with_timezone(&report.timezone)
+        .date_naive();
+    let next_date = date
+        .succ_opt()
+        .context("fake report date has no successor")?;
+    let midnight = date.and_hms_opt(0, 0, 0).context("construct midnight")?;
+    let next_midnight = next_date
+        .and_hms_opt(0, 0, 0)
+        .context("construct next midnight")?;
+    let day_start = report
+        .timezone
+        .from_local_datetime(&midnight)
+        .single()
+        .context("resolve fake report day start")?
+        .with_timezone(&Utc);
+    let day_end = report
+        .timezone
+        .from_local_datetime(&next_midnight)
+        .single()
+        .context("resolve fake report day end")?
+        .with_timezone(&Utc);
+    let bucket_seconds = i64::try_from(report.bucket_seconds)
+        .context("fake report bucket_seconds exceeds supported range")?;
+    let day_seconds = (day_end - day_start).num_seconds();
+    if day_seconds % bucket_seconds != 0 {
+        bail!("fake report day is not divisible by its bucket size");
+    }
+
+    let existing = std::mem::take(&mut report.buckets);
+    let template = existing
+        .first()
+        .cloned()
+        .context("fake report has no bucket template")?;
+    let mut by_start = existing
+        .into_iter()
+        .map(|bucket| (bucket.start.with_timezone(&Utc), bucket))
+        .collect::<BTreeMap<_, _>>();
+    let bucket_span = TimeDelta::seconds(bucket_seconds);
+    let mut cursor = day_start;
+    let mut buckets = Vec::with_capacity((day_seconds / bucket_seconds) as usize);
+    while cursor < day_end {
+        let end = cursor + bucket_span;
+        let mut bucket = by_start
+            .remove(&cursor)
+            .unwrap_or_else(|| empty_bucket(&template));
+        bucket.start = cursor.fixed_offset();
+        bucket.end = end.fixed_offset();
+        buckets.push(bucket);
+        cursor = end;
+    }
+    if !by_start.is_empty() {
+        bail!("fake report contains buckets outside its selected day");
+    }
+
+    report.range_start = day_start.fixed_offset();
+    report.range_end = day_end.fixed_offset();
+    report.bucket_count = buckets.len();
+    report.elapsed_bucket_count = if report.partial {
+        let effective_end = report.effective_end.with_timezone(&Utc);
+        buckets.partition_point(|bucket| bucket.start.with_timezone(&Utc) < effective_end)
+    } else {
+        buckets.len()
+    };
+    report.buckets = buckets;
+    Ok(())
+}
+
+fn empty_bucket(template: &Bucket) -> Bucket {
+    let mut bucket = template.clone();
+    bucket.max_agents = 0;
+    bucket.agent_minutes = 0.0;
+    bucket.output_tokens = 0;
+    bucket.cost = Money { microdollars: 0 };
+    bucket.automated_at_peak = 0;
+    bucket.interactive_at_peak = 0;
+    bucket
+}
+
 fn shift_timestamp(value: DateTime<FixedOffset>, delta: TimeDelta) -> DateTime<FixedOffset> {
     (value.with_timezone(&Utc) + delta).fixed_offset()
 }
@@ -381,6 +466,8 @@ fn write_config(path: &Path, port: u16) -> anyhow::Result<()> {
 mod tests {
     use std::collections::BTreeMap;
 
+    use chrono::{NaiveTime, TimeDelta};
+
     use super::{scenario_for_query, scenario_report, ReportScenario};
 
     #[test]
@@ -423,6 +510,33 @@ mod tests {
     }
 
     #[test]
+    fn demo_reports_cover_the_full_local_day() {
+        // If the fake serves the compact contract fixture unchanged, the one-command demo
+        // compresses its concurrency axis to a 30-minute slice instead of the selected day.
+        let report = scenario_report(&BTreeMap::from([(
+            "automation".to_owned(),
+            "all".to_owned(),
+        )]))
+        .unwrap();
+        let local_start = report.range_start.with_timezone(&report.timezone);
+        let local_end = report.range_end.with_timezone(&report.timezone);
+        let range_seconds = (report.range_end - report.range_start).num_seconds();
+
+        assert_eq!(local_start.time(), NaiveTime::MIN);
+        assert_eq!(local_end.time(), NaiveTime::MIN);
+        assert_eq!(
+            local_end.date_naive(),
+            local_start.date_naive().succ_opt().unwrap()
+        );
+        assert_eq!(
+            range_seconds,
+            report.bucket_count as i64 * report.bucket_seconds as i64
+        );
+        assert_eq!(report.buckets.len(), report.bucket_count);
+        assert!(report.buckets.iter().any(|bucket| bucket.max_agents > 0));
+    }
+
+    #[test]
     fn requested_date_uses_the_timezone_offset_for_that_day() {
         // If date alignment retains the fixture offset, a response across a DST boundary claims
         // one timezone while returning instants for another local day.
@@ -432,9 +546,16 @@ mod tests {
             ("timezone".to_owned(), "America/New_York".to_owned()),
         ]))
         .unwrap();
+        let local_start = report.range_start.with_timezone(&report.timezone);
+        let local_end = report.range_end.with_timezone(&report.timezone);
 
-        assert_eq!(report.range_start.to_rfc3339(), "2026-11-01T18:00:00+00:00");
-        assert_eq!(report.range_end.to_rfc3339(), "2026-11-01T18:30:00+00:00");
+        assert_eq!(local_start.time(), NaiveTime::MIN);
+        assert_eq!(local_end.time(), NaiveTime::MIN);
+        assert_eq!(
+            local_end.date_naive(),
+            local_start.date_naive().succ_opt().unwrap()
+        );
+        assert_eq!(report.range_end - report.range_start, TimeDelta::hours(25));
     }
 
     #[test]
@@ -446,8 +567,11 @@ mod tests {
             "Asia/Tokyo".to_owned(),
         )]))
         .unwrap();
+        let local_start = report.range_start.with_timezone(&report.timezone);
 
         assert_eq!(report.timezone.name(), "Asia/Tokyo");
-        assert_eq!(report.range_start.to_rfc3339(), "2026-08-08T17:00:00+00:00");
+        assert_eq!(report.range_start.offset().local_minus_utc(), 0);
+        assert_eq!(report.range_end.offset().local_minus_utc(), 0);
+        assert_eq!(local_start.time(), NaiveTime::MIN);
     }
 }
