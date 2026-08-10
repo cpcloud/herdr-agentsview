@@ -106,9 +106,6 @@ pub fn assert_golden(path: &str, actual: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join(path);
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, actual).unwrap();
-    }
     assert_eq!(actual, fs::read_to_string(path).unwrap());
 }
 
