@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use crate::api::ApiError;
+use crate::api::{ApiError, ApiErrorKind};
 use crate::wire::{AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection};
 
 pub(crate) use filters::PopupQueryEdit;
@@ -212,6 +212,20 @@ impl App {
             kind: RequestKind::Refresh,
             selection: self.selection.clone(),
         })
+    }
+
+    pub fn begin_scheduled_load(&mut self) -> Option<ReportRequest> {
+        let retry_transient_failure = matches!(
+            self.report_state,
+            ReportState::Failed(ApiError {
+                kind: ApiErrorKind::Timeout | ApiErrorKind::Network | ApiErrorKind::Server,
+                ..
+            })
+        );
+        if retry_transient_failure {
+            return Some(self.begin_foreground_load());
+        }
+        self.begin_refresh()
     }
 
     pub fn supersede_pending_load(&mut self) -> Option<ReportRequest> {

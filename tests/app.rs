@@ -209,6 +209,47 @@ fn foreground_failures_preserve_the_boundary_classification() {
 }
 
 #[test]
+fn scheduled_load_retries_only_transient_foreground_failures() {
+    // If scheduled recovery retries permanent failures, a bad token or incompatible API is
+    // hammered forever; if it ignores transient failures, a brief outage becomes permanent.
+    for kind in [
+        ApiErrorKind::Timeout,
+        ApiErrorKind::Network,
+        ApiErrorKind::Server,
+    ] {
+        let mut app = App::new(selection(), Duration::from_secs(300));
+        let request = app.begin_foreground_load();
+        app.apply_report(
+            request.generation,
+            Err(error(kind, "transient failure")),
+            received_at(),
+        );
+
+        assert_eq!(
+            app.begin_scheduled_load().unwrap().kind,
+            RequestKind::Foreground
+        );
+    }
+
+    for kind in [
+        ApiErrorKind::Authentication,
+        ApiErrorKind::Forbidden,
+        ApiErrorKind::Protocol,
+    ] {
+        let mut app = App::new(selection(), Duration::from_secs(300));
+        let request = app.begin_foreground_load();
+        app.apply_report(
+            request.generation,
+            Err(error(kind, "permanent failure")),
+            received_at(),
+        );
+
+        assert!(app.begin_scheduled_load().is_none());
+        assert!(matches!(app.report_state(), ReportState::Failed(_)));
+    }
+}
+
+#[test]
 fn partial_and_empty_reports_remain_distinct_ready_states() {
     // If partial fields or an empty result are normalized away, future buckets can look like
     // observed zeroes and a real empty day can look like a transport failure.

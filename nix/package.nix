@@ -56,7 +56,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
   meta = {
     description = "Terminal-native AgentsView Activity dashboard for Herdr";
-    license = lib.licenses.mit;
     mainProgram = "herdr-agentsview";
     platforms = [
       "x86_64-linux"

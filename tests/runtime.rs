@@ -34,6 +34,7 @@ struct ServerState {
     cancellations: AtomicUsize,
     gated_reports: Mutex<BTreeSet<usize>>,
     hold_all: AtomicBool,
+    fail_first_report: AtomicBool,
     fail_first_projects: AtomicBool,
     gate: Notify,
 }
@@ -103,6 +104,10 @@ impl RecordingServer {
     fn fail_first_projects_request(&self) {
         self.state.fail_first_projects.store(true, Ordering::SeqCst);
     }
+
+    fn fail_first_report_request(&self) {
+        self.state.fail_first_report.store(true, Ordering::SeqCst);
+    }
 }
 
 impl Drop for RecordingServer {
@@ -157,6 +162,10 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
     }
 
     let (status, body) = match route {
+        Route::Report(1) if state.fail_first_report.load(Ordering::SeqCst) => (
+            "503 Service Unavailable",
+            "temporarily unavailable".to_owned(),
+        ),
         Route::Report(ordinal) => ("200 OK", report_for_path(&path, ordinal)),
         Route::Projects(1) if state.fail_first_projects.load(Ordering::SeqCst) => (
             "503 Service Unavailable",
@@ -414,6 +423,35 @@ async fn configured_timeout_owns_recovery_without_scheduled_cancellation() {
                 .is_some_and(|report| report.totals.sessions == 9)
     })
     .await;
+}
+
+#[tokio::test]
+async fn scheduled_refresh_recovers_from_a_transient_initial_failure() {
+    // If periodic refresh ignores a failed initial report, a short API outage leaves the
+    // dashboard unavailable forever even after the endpoint recovers.
+    let server = RecordingServer::start().await;
+    server.fail_first_report_request();
+    let config = server.config(Duration::from_secs(1));
+    let mut app = app(&config, NaiveDate::from_ymd_opt(2026, 8, 8).unwrap());
+    let started_at = Instant::now();
+    let mut runtime = Runtime::new_at(&config, started_at).unwrap();
+    runtime.start(&mut app);
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.report_state(), ReportState::Failed(_))
+    })
+    .await;
+
+    runtime
+        .tick(&mut app, started_at + Duration::from_secs(1))
+        .unwrap();
+
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.report_state(), ReportState::Ready { .. })
+    })
+    .await;
+    assert_eq!(server.state.report_count.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

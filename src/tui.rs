@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -214,7 +215,7 @@ impl Runtime {
     fn scheduled_report_request(&mut self, app: &mut App) -> Option<ReportRequest> {
         if self.report.is_none() {
             self.reset_report_backoff();
-            return app.begin_refresh();
+            return app.begin_scheduled_load();
         }
         if self.report_timeout_configured {
             return None;
@@ -373,9 +374,13 @@ fn map_key(key: KeyEvent) -> Option<InputKey> {
 fn terminal_capabilities() -> TerminalCapabilities {
     TerminalCapabilities {
         color_count: available_color_count(),
-        no_color: std::env::var_os("NO_COLOR").is_some(),
+        no_color: no_color_requested(std::env::var_os("NO_COLOR").as_deref()),
         term_is_dumb: std::env::var("TERM").is_ok_and(|term| term == "dumb"),
     }
+}
+
+fn no_color_requested(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
 }
 
 struct RestoreTerminal {
@@ -421,6 +426,7 @@ impl Drop for RestoreTerminal {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::time::Duration;
 
     use chrono::NaiveDate;
@@ -430,7 +436,16 @@ mod tests {
     use crate::app::{App, InputKey};
     use crate::wire::{Report, ReportSelection};
 
-    use super::{map_key, synchronize_layout};
+    use super::{map_key, no_color_requested, synchronize_layout};
+
+    #[test]
+    fn empty_no_color_value_keeps_terminal_colors_enabled() {
+        // If an empty value disables color, inherited placeholder variables silently erase
+        // categorical distinctions even though the NO_COLOR convention excludes empty strings.
+        assert!(!no_color_requested(None));
+        assert!(!no_color_requested(Some(OsStr::new(""))));
+        assert!(no_color_requested(Some(OsStr::new("1"))));
+    }
 
     #[test]
     fn layout_synchronization_keeps_session_scroll_inside_the_rendered_viewport() {
