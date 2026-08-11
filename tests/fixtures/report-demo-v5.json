@@ -1,0 +1,151 @@
+{
+  "schema_version": 5,
+  "range_start": "2026-08-08T13:00:00Z",
+  "range_end": "2026-08-08T21:30:00Z",
+  "effective_end": "2026-08-08T21:20:00Z",
+  "as_of": "2026-08-08T21:20:00Z",
+  "timezone": "America/New_York",
+  "partial": true,
+  "bucket_seconds": 1800,
+  "bucket_unit": "minute",
+  "bucket_count": 17,
+  "elapsed_bucket_count": 17,
+  "totals": {
+    "active_minutes": 440.0,
+    "idle_minutes": 60.0,
+    "agent_minutes": 610.0,
+    "sessions": 12,
+    "untimed_sessions": 1,
+    "distinct_projects": 3,
+    "distinct_models": 3,
+    "output_tokens": 20400,
+    "cost": { "microdollars": 44700000 },
+    "automated_agent_minutes": 235.0,
+    "interactive_agent_minutes": 375.0,
+    "automated_cost": { "microdollars": 12200000 },
+    "interactive_cost": { "microdollars": 32500000 },
+    "automated_sessions": 4,
+    "interactive_sessions": 8
+  },
+  "peak": {
+    "agents": 3,
+    "at": "2026-08-08T16:10:00Z"
+  },
+  "buckets": [
+    { "start": "2026-08-08T13:00:00Z", "end": "2026-08-08T13:30:00Z", "max_agents": 2, "agent_minutes": 40.0, "output_tokens": 900, "cost": { "microdollars": 2000000 }, "automated_at_peak": 0, "interactive_at_peak": 2 },
+    { "start": "2026-08-08T13:30:00Z", "end": "2026-08-08T14:00:00Z", "max_agents": 2, "agent_minutes": 35.0, "output_tokens": 1050, "cost": { "microdollars": 2300000 }, "automated_at_peak": 0, "interactive_at_peak": 2 },
+    { "start": "2026-08-08T14:00:00Z", "end": "2026-08-08T14:30:00Z", "max_agents": 1, "agent_minutes": 25.0, "output_tokens": 500, "cost": { "microdollars": 1100000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T14:30:00Z", "end": "2026-08-08T15:00:00Z", "max_agents": 2, "agent_minutes": 50.0, "output_tokens": 1200, "cost": { "microdollars": 2400000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T15:00:00Z", "end": "2026-08-08T15:30:00Z", "max_agents": 1, "agent_minutes": 30.0, "output_tokens": 1300, "cost": { "microdollars": 2800000 }, "automated_at_peak": 1, "interactive_at_peak": 0 },
+    { "start": "2026-08-08T15:30:00Z", "end": "2026-08-08T16:00:00Z", "max_agents": 2, "agent_minutes": 60.0, "output_tokens": 1600, "cost": { "microdollars": 3500000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T16:00:00Z", "end": "2026-08-08T16:30:00Z", "max_agents": 3, "agent_minutes": 65.0, "output_tokens": 1800, "cost": { "microdollars": 4000000 }, "automated_at_peak": 2, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T16:30:00Z", "end": "2026-08-08T17:00:00Z", "max_agents": 2, "agent_minutes": 35.0, "output_tokens": 1500, "cost": { "microdollars": 3200000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T17:00:00Z", "end": "2026-08-08T17:30:00Z", "max_agents": 1, "agent_minutes": 15.0, "output_tokens": 900, "cost": { "microdollars": 1500000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T17:30:00Z", "end": "2026-08-08T18:00:00Z", "max_agents": 1, "agent_minutes": 30.0, "output_tokens": 1100, "cost": { "microdollars": 2100000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T18:00:00Z", "end": "2026-08-08T18:30:00Z", "max_agents": 2, "agent_minutes": 60.0, "output_tokens": 1700, "cost": { "microdollars": 3800000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T18:30:00Z", "end": "2026-08-08T19:00:00Z", "max_agents": 2, "agent_minutes": 25.0, "output_tokens": 1400, "cost": { "microdollars": 3200000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T19:00:00Z", "end": "2026-08-08T19:30:00Z", "max_agents": 1, "agent_minutes": 20.0, "output_tokens": 700, "cost": { "microdollars": 1200000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T19:30:00Z", "end": "2026-08-08T20:00:00Z", "max_agents": 1, "agent_minutes": 30.0, "output_tokens": 1050, "cost": { "microdollars": 2200000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T20:00:00Z", "end": "2026-08-08T20:30:00Z", "max_agents": 1, "agent_minutes": 15.0, "output_tokens": 500, "cost": { "microdollars": 1000000 }, "automated_at_peak": 0, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T20:30:00Z", "end": "2026-08-08T21:00:00Z", "max_agents": 2, "agent_minutes": 55.0, "output_tokens": 1800, "cost": { "microdollars": 3500000 }, "automated_at_peak": 1, "interactive_at_peak": 1 },
+    { "start": "2026-08-08T21:00:00Z", "end": "2026-08-08T21:30:00Z", "max_agents": 1, "agent_minutes": 20.0, "output_tokens": 1400, "cost": { "microdollars": 4900000 }, "automated_at_peak": 1, "interactive_at_peak": 0 }
+  ],
+  "by_project": [
+    { "project_key": "pl1-alpha", "key": "project-alpha", "agent_minutes": 320.0, "cost": { "microdollars": 23100000 }, "automated_agent_minutes": 95.0, "interactive_agent_minutes": 225.0, "automated_cost": { "microdollars": 4300000 }, "interactive_cost": { "microdollars": 18800000 } },
+    { "project_key": "pl1-beta", "key": "project-beta", "agent_minutes": 150.0, "cost": { "microdollars": 12700000 }, "automated_agent_minutes": 45.0, "interactive_agent_minutes": 105.0, "automated_cost": { "microdollars": 2600000 }, "interactive_cost": { "microdollars": 10100000 } },
+    { "project_key": "pl1-gamma", "key": "project-gamma", "agent_minutes": 140.0, "cost": { "microdollars": 8900000 }, "automated_agent_minutes": 95.0, "interactive_agent_minutes": 45.0, "automated_cost": { "microdollars": 5300000 }, "interactive_cost": { "microdollars": 3600000 } }
+  ],
+  "by_model": [
+    { "key": "model-alpha", "agent_minutes": 270.0, "cost": { "microdollars": 22400000 }, "automated_agent_minutes": 0.0, "interactive_agent_minutes": 270.0, "automated_cost": { "microdollars": 0 }, "interactive_cost": { "microdollars": 22400000 } },
+    { "key": "model-beta", "agent_minutes": 235.0, "cost": { "microdollars": 13400000 }, "automated_agent_minutes": 185.0, "interactive_agent_minutes": 50.0, "automated_cost": { "microdollars": 9300000 }, "interactive_cost": { "microdollars": 4100000 } },
+    { "key": "model-gamma", "agent_minutes": 105.0, "cost": { "microdollars": 8900000 }, "automated_agent_minutes": 50.0, "interactive_agent_minutes": 55.0, "automated_cost": { "microdollars": 2900000 }, "interactive_cost": { "microdollars": 6000000 } }
+  ],
+  "by_agent": [
+    { "key": "codex", "agent_minutes": 325.0, "cost": { "microdollars": 28400000 }, "automated_agent_minutes": 0.0, "interactive_agent_minutes": 325.0, "automated_cost": { "microdollars": 0 }, "interactive_cost": { "microdollars": 28400000 } },
+    { "key": "reviewer", "agent_minutes": 285.0, "cost": { "microdollars": 16300000 }, "automated_agent_minutes": 235.0, "interactive_agent_minutes": 50.0, "automated_cost": { "microdollars": 12200000 }, "interactive_cost": { "microdollars": 4100000 } }
+  ],
+  "by_session": [
+    { "session_id": "session-review-dependencies", "project_key": "pl1-alpha", "title": "Review dependency updates", "project": "project-alpha", "agent": "reviewer", "primary_model": "model-beta", "models": ["model-beta"], "agent_minutes": 95.0, "cost": { "microdollars": 4300000 }, "output_tokens": 2200, "first_active": "2026-08-08T14:40:00Z", "last_active": "2026-08-08T16:15:00Z", "timing_quality": "timed", "is_automated": true },
+    { "session_id": "session-filters", "project_key": "pl1-alpha", "title": "Implement session filters", "project": "project-alpha", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 80.0, "cost": { "microdollars": 6700000 }, "output_tokens": 3100, "first_active": "2026-08-08T17:15:00Z", "last_active": "2026-08-08T18:35:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-terminal-layout", "project_key": "pl1-alpha", "title": "Refine terminal layout", "project": "project-alpha", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 70.0, "cost": { "microdollars": 5800000 }, "output_tokens": 2450, "first_active": "2026-08-08T15:30:00Z", "last_active": "2026-08-08T16:40:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-refresh-regression", "project_key": "pl1-beta", "title": "Fix refresh regression", "project": "project-beta", "agent": "codex", "primary_model": "model-gamma", "models": ["model-gamma"], "agent_minutes": 55.0, "cost": { "microdollars": 4800000 }, "output_tokens": 1900, "first_active": "2026-08-08T19:10:00Z", "last_active": "2026-08-08T20:05:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-api-latency", "project_key": "pl1-beta", "title": "Trace API latency", "project": "project-beta", "agent": "reviewer", "primary_model": "model-beta", "models": ["model-beta"], "agent_minutes": 50.0, "cost": { "microdollars": 4100000 }, "output_tokens": 1650, "first_active": "2026-08-08T13:20:00Z", "last_active": "2026-08-08T14:10:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-release-checks", "project_key": "pl1-gamma", "title": "Run release checks", "project": "project-gamma", "agent": "reviewer", "primary_model": "model-gamma", "models": ["model-gamma"], "agent_minutes": 50.0, "cost": { "microdollars": 2900000 }, "output_tokens": 1800, "first_active": "2026-08-08T18:00:00Z", "last_active": "2026-08-08T18:50:00Z", "timing_quality": "timed", "is_automated": true },
+    { "session_id": "session-nix-package", "project_key": "pl1-gamma", "title": "Update Nix package", "project": "project-gamma", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 45.0, "cost": { "microdollars": 3600000 }, "output_tokens": 1300, "first_active": "2026-08-08T14:15:00Z", "last_active": "2026-08-08T15:00:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-error-states", "project_key": "pl1-beta", "title": "Audit error states", "project": "project-beta", "agent": "reviewer", "primary_model": "model-beta", "models": ["model-beta"], "agent_minutes": 45.0, "cost": { "microdollars": 2600000 }, "output_tokens": 1700, "first_active": "2026-08-08T16:10:00Z", "last_active": "2026-08-08T16:55:00Z", "timing_quality": "timed", "is_automated": true },
+    { "session_id": "session-ci-summary", "project_key": "pl1-gamma", "title": "Summarize CI failures", "project": "project-gamma", "agent": "reviewer", "primary_model": "model-beta", "models": ["model-beta"], "agent_minutes": 45.0, "cost": { "microdollars": 2400000 }, "output_tokens": 1450, "first_active": "2026-08-08T20:35:00Z", "last_active": "2026-08-08T21:20:00Z", "timing_quality": "timed", "is_automated": true },
+    { "session_id": "session-readme-demo", "project_key": "pl1-alpha", "title": "Polish README demo", "project": "project-alpha", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 40.0, "cost": { "microdollars": 3100000 }, "output_tokens": 1100, "first_active": "2026-08-08T20:20:00Z", "last_active": "2026-08-08T21:00:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-dashboard-plan", "project_key": "pl1-alpha", "title": "Plan dashboard refresh", "project": "project-alpha", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 35.0, "cost": { "microdollars": 3200000 }, "output_tokens": 1200, "first_active": "2026-08-08T13:00:00Z", "last_active": "2026-08-08T13:35:00Z", "timing_quality": "timed", "is_automated": false },
+    { "session_id": "session-imported", "project_key": "pl1-beta", "title": "Imported historical run", "project": "project-beta", "agent": "codex", "primary_model": "model-gamma", "models": ["model-gamma"], "agent_minutes": null, "cost": { "microdollars": 1200000 }, "output_tokens": 550, "first_active": null, "last_active": null, "timing_quality": "untimed", "is_automated": false }
+  ],
+  "intervals": [
+    { "session_id": "session-dashboard-plan", "start": "2026-08-08T13:00:00Z", "end": "2026-08-08T13:35:00Z" },
+    { "session_id": "session-api-latency", "start": "2026-08-08T13:20:00Z", "end": "2026-08-08T14:10:00Z" },
+    { "session_id": "session-nix-package", "start": "2026-08-08T14:15:00Z", "end": "2026-08-08T15:00:00Z" },
+    { "session_id": "session-review-dependencies", "start": "2026-08-08T14:40:00Z", "end": "2026-08-08T16:15:00Z" },
+    { "session_id": "session-terminal-layout", "start": "2026-08-08T15:30:00Z", "end": "2026-08-08T16:40:00Z" },
+    { "session_id": "session-error-states", "start": "2026-08-08T16:10:00Z", "end": "2026-08-08T16:55:00Z" },
+    { "session_id": "session-filters", "start": "2026-08-08T17:15:00Z", "end": "2026-08-08T18:35:00Z" },
+    { "session_id": "session-release-checks", "start": "2026-08-08T18:00:00Z", "end": "2026-08-08T18:50:00Z" },
+    { "session_id": "session-refresh-regression", "start": "2026-08-08T19:10:00Z", "end": "2026-08-08T20:05:00Z" },
+    { "session_id": "session-readme-demo", "start": "2026-08-08T20:20:00Z", "end": "2026-08-08T21:00:00Z" },
+    { "session_id": "session-ci-summary", "start": "2026-08-08T20:35:00Z", "end": "2026-08-08T21:20:00Z" }
+  ],
+  "pricing": {
+    "source": "custom+embedded",
+    "table_version": "2026-08-01",
+    "latest_row_updated_at": null,
+    "custom_override_count": 1,
+    "effective_row_count": 3,
+    "digest": "sha256:demo-fixture",
+    "cost_source": "mixed",
+    "fallback": { "used": true, "models": ["model-beta", "model-gamma"] },
+    "models": {
+      "model-alpha": {
+        "cost_source": "reported",
+        "resolutions": [
+          {
+            "priced_model": "model-alpha",
+            "matched_pattern": null,
+            "input_cost_per_mtok": { "microdollars": 3000000 },
+            "output_cost_per_mtok": { "microdollars": 15000000 },
+            "cache_write_cost_per_mtok": { "microdollars": 3750000 },
+            "cache_read_cost_per_mtok": { "microdollars": 300000 },
+            "cost_source": "computed",
+            "bands": [
+              {
+                "above_input_tokens": 200000,
+                "input_cost_per_mtok": { "microdollars": 6000000 },
+                "output_cost_per_mtok": { "microdollars": 22500000 },
+                "cache_write_cost_per_mtok": { "microdollars": 7500000 },
+                "cache_read_cost_per_mtok": { "microdollars": 600000 }
+              }
+            ],
+            "application": {
+              "base_request_count": 8,
+              "aggregate_row_count": 4,
+              "bands": [
+                { "above_input_tokens": 200000, "request_count": 3 }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "projects": {
+    "pl1-alpha": {
+      "display_label": "project-alpha",
+      "resolution": "resolved",
+      "identity": {
+        "key": "pl1-alpha",
+        "kind": "git_remote",
+        "normalized_remote": "https://example.invalid/project-alpha",
+        "root_key": "root-alpha",
+        "repository_key": "repo-alpha"
+      }
+    },
+    "pl1-beta": { "display_label": "project-beta", "resolution": "unknown" },
+    "pl1-gamma": { "display_label": "project-gamma", "resolution": "ambiguous" }
+  }
+}

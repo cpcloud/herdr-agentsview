@@ -7,14 +7,14 @@ Require nix
 
 Set Shell "bash"
 Set FontSize 16
-Set Width 1280
-Set Height 960
+Set Width 2060
+Set Height 1200
 Set TypingSpeed 20ms
 
 Type "nix run .#demo"
 Enter
 Wait+Screen /Updated [0-9]+s ago/
-Wait+Screen /Peak 2/
+Wait+Screen /Peak [1-9]/
 Sleep 250ms
 Screenshot assets/dashboard.png
 Sleep 1s
