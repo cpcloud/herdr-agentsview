@@ -33,17 +33,20 @@ refresh_interval_seconds = 60
 timezone = "Etc/UTC"
 ```
 
-Expose exactly one of `AGENTSVIEW_TOKEN` or `AGENTSVIEW_TOKEN_FILE` to the
-environment that starts Herdr. Keep the credential out of the config file and
-the repository. From a Herdr pane, open the dashboard with:
+The default loopback AgentsView server does not require a token. If the server
+has authentication enabled, expose its bearer token to Herdr through exactly
+one of `AGENTSVIEW_TOKEN` or `AGENTSVIEW_TOKEN_FILE`. Keep the credential out
+of the config file and the repository. From a Herdr pane, open the dashboard
+with:
 
 ```console
 herdr plugin action invoke open --plugin local.agentsview
 ```
 
 For a standalone terminal from a local checkout, set `HERDR_PLUGIN_CONFIG_DIR`
-to the directory containing `config.toml`, expose the same runtime token, and
-run `cargo run --release -- tui`.
+to the directory containing `config.toml`. If the server requires a token,
+expose it through the same environment variable, then run
+`cargo run --release -- tui`.
 
 ## Demo
 
