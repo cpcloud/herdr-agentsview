@@ -2,7 +2,10 @@
   description = "AgentsView activity, compressed into one very busy terminal.";
 
   inputs = {
-    git-hooks.url = "github:cachix/git-hooks.nix";
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     herdr = {
       url = "github:ogulcancelik/herdr/master";
       inputs.nixpkgs.follows = "nixpkgs";
