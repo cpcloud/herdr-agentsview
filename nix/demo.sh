@@ -3,8 +3,8 @@ set -euo pipefail
 
 umask 077
 
-demo_parent=$(@@REALPATH@@ -- "${TMPDIR:-/tmp}")
-demo_root=$(@@MKTEMP@@ -d "$demo_parent/herdr-agentsview-demo.XXXXXX")
+demo_parent=$(realpath -- "${TMPDIR:-/tmp}")
+demo_root=$(mktemp -d "$demo_parent/herdr-agentsview-demo.XXXXXX")
 fake_api_pid=
 
 case "$demo_root" in
@@ -30,7 +30,7 @@ cleanup() {
 	if [[ -d $demo_root ]]; then
 		case "$demo_root" in
 		"$demo_parent"/herdr-agentsview-demo.*)
-			@@RM@@ -r -- "$demo_root" || cleanup_failed=1
+			rm -r -- "$demo_root" || cleanup_failed=1
 			;;
 		*)
 			echo "refusing to remove an unexpected demo path" >&2
@@ -57,7 +57,7 @@ export XDG_DATA_HOME="$demo_root/data"
 export XDG_STATE_HOME="$demo_root/state"
 
 config_dir="$demo_root/plugin"
-@@MKDIR@@ -p \
+mkdir -p \
 	"$HOME" \
 	"$XDG_CACHE_HOME" \
 	"$XDG_CONFIG_HOME" \
@@ -83,7 +83,7 @@ if [[ -v NO_COLOR ]]; then
 	clean_environment+=("NO_COLOR=$NO_COLOR")
 fi
 
-@@ENV@@ -i "${clean_environment[@]}" \
+env -i "${clean_environment[@]}" \
 	@@FAKE_API@@ --config-out "$config_dir/config.toml" \
 	>"$demo_root/fake-api.log" 2>&1 &
 fake_api_pid=$!
@@ -96,7 +96,7 @@ for _ in {1..200}; do
 		echo "synthetic API stopped before the demo was ready" >&2
 		exit 1
 	fi
-	@@SLEEP@@ 0.025
+	sleep 0.025
 done
 
 if [[ ! -s "$config_dir/config.toml" ]]; then
@@ -104,6 +104,6 @@ if [[ ! -s "$config_dir/config.toml" ]]; then
 	exit 1
 fi
 
-@@ENV@@ -i "${clean_environment[@]}" \
+env -i "${clean_environment[@]}" \
 	"HERDR_PLUGIN_CONFIG_DIR=$config_dir" \
 	@@TUI@@ tui
