@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Phillip Cloud
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # herdr-agentsview
 
 <!-- HTML is required because GitHub Markdown has no image-sizing syntax. -->
@@ -48,6 +54,14 @@ directory containing `config.toml`, expose the same runtime token, and run
 ## Platforms
 
 x86_64 Linux, aarch64 Linux, and aarch64 macOS.
+
+## Dependency Updates
+
+Dependency updates use the Mend-hosted Renovate service. To activate it, a
+repository owner must install the Mend Renovate App for only
+`cpcloud/herdr-agentsview`. The hosted service manages authentication,
+scheduling, and Renovate version updates; this repository does not need a
+Renovate workflow or token.
 
 ## Keys
 

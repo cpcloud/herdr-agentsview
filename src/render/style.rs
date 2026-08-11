@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders};
 use unicode_segmentation::UnicodeSegmentation;

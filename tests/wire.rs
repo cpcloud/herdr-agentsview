@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use chrono::NaiveDate;
 use herdr_agentsview::wire::{
     AgentInfo, AgentsResponse, Automation, ProjectInfo, ProjectsResponse, Report, ReportSelection,

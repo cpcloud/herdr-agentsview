@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Phillip Cloud
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Capture the real TUI against the demo's ephemeral synthetic API.
 Require nix
 
