@@ -26,6 +26,7 @@ use crate::render::{self, TerminalCapabilities};
 use crate::wire::ReportSelection;
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STATUS_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 
 struct OwnedTask {
     token: u64,
@@ -309,10 +310,12 @@ fn run_loop(
     timezone: chrono_tz::Tz,
 ) -> anyhow::Result<()> {
     let mut redraw_requested = true;
+    let mut next_status_redraw = Instant::now();
     loop {
         redraw_requested |= runtime.drain_events(app) > 0;
-        runtime.tick(app, Instant::now())?;
-        if redraw_required(app, redraw_requested) {
+        let now = Instant::now();
+        runtime.tick(app, now)?;
+        if redraw_required(app, redraw_requested, now >= next_status_redraw) {
             terminal
                 .draw(|frame| {
                     let plan = synchronize_layout(app, frame.area());
@@ -320,6 +323,7 @@ fn run_loop(
                 })
                 .context("draw Activity dashboard")?;
             redraw_requested = false;
+            next_status_redraw = now + STATUS_REDRAW_INTERVAL;
         }
 
         if !event::poll(INPUT_POLL_INTERVAL).context("poll terminal input")? {
@@ -341,12 +345,17 @@ fn run_loop(
     }
 }
 
-fn redraw_required(app: &App, state_changed: bool) -> bool {
+fn redraw_required(app: &App, state_changed: bool, clock_due: bool) -> bool {
     state_changed
         || matches!(
             app.report_state(),
             ReportState::InitialLoading { .. } | ReportState::Refreshing { .. }
         )
+        || clock_due
+            && matches!(
+                app.report_state(),
+                ReportState::Ready { .. } | ReportState::Stale { .. }
+            )
 }
 
 fn synchronize_layout(app: &mut App, area: Rect) -> render::FramePlan {
@@ -448,6 +457,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Rect;
 
+    use crate::api::ApiError;
     use crate::app::{App, InputKey};
     use crate::wire::{Report, ReportSelection};
 
@@ -463,13 +473,14 @@ mod tests {
     }
 
     #[test]
-    fn ready_dashboard_does_not_request_an_idle_redraw() {
+    fn ready_dashboard_uses_a_clock_deadline_instead_of_every_input_poll() {
         // If an unchanged ready dashboard redraws on every input poll, large day reports are
-        // repeatedly sorted and recolored while the terminal is idle.
+        // repeatedly sorted; if it never redraws, the wall-clock freshness label freezes.
         let app = ready_app();
 
-        assert!(!redraw_required(&app, false));
-        assert!(redraw_required(&app, true));
+        assert!(!redraw_required(&app, false, false));
+        assert!(redraw_required(&app, true, false));
+        assert!(redraw_required(&app, false, true));
     }
 
     #[test]
@@ -483,7 +494,22 @@ mod tests {
         let mut app = App::new(selection, Duration::from_secs(300));
         app.begin_foreground_load();
 
-        assert!(redraw_required(&app, false));
+        assert!(redraw_required(&app, false, false));
+    }
+
+    #[test]
+    fn stale_dashboard_redraws_when_its_age_clock_is_due() {
+        // If stale data does not share the freshness deadline, its age freezes even though
+        // the warning remains mounted until a successful retry.
+        let mut app = ready_app();
+        let request = app.begin_refresh().unwrap();
+        app.apply_report(
+            request.generation,
+            Err(ApiError::timeout()),
+            "2026-08-08T17:21:01Z".parse().unwrap(),
+        );
+
+        assert!(redraw_required(&app, false, true));
     }
 
     #[test]
