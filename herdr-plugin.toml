@@ -4,19 +4,22 @@
 
 id = "local.agentsview"
 name = "AgentsView"
-version = "@VERSION@"
+version = "0.1.0"
 min_herdr_version = "0.7.4"
 description = "Inspect AgentsView activity from Herdr"
 platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release", "--locked"]
 
 [[actions]]
 id = "open"
 title = "Open AgentsView"
 contexts = ["workspace"]
-command = ["@HERDR_AGENTSVIEW@", "open"]
+command = ["./target/release/herdr-agentsview", "open"]
 
 [[panes]]
 id = "activity"
 title = "AgentsView"
 placement = "split"
-command = ["@HERDR_AGENTSVIEW@", "tui"]
+command = ["./target/release/herdr-agentsview", "tui"]

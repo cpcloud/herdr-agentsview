@@ -14,19 +14,13 @@ AgentsView activity, compressed into one very busy terminal.
 
 ![Synthetic AgentsView Activity dashboard](assets/dashboard.png)
 
-The screenshot is synthetic. Try the same isolated dashboard without an
-AgentsView or Herdr setup:
+## Install
+
+Install the plugin from GitHub. Herdr previews the source and build command,
+then builds it with Cargo before registering it:
 
 ```console
-nix run .#demo
-```
-
-## Real Setup
-
-Build the plugin and link its generated manifest into Herdr:
-
-```console
-herdr plugin link "$(nix build --no-link --print-out-paths .#herdr-agentsview)/share/herdr/plugins/local-agentsview"
+herdr plugin install cpcloud/herdr-agentsview
 herdr plugin config-dir local.agentsview
 ```
 
@@ -41,15 +35,24 @@ timezone = "Etc/UTC"
 
 Expose exactly one of `AGENTSVIEW_TOKEN` or `AGENTSVIEW_TOKEN_FILE` to the
 environment that starts Herdr. Keep the credential out of the config file and
-the Nix store. From a Herdr pane, open the dashboard with:
+the repository. From a Herdr pane, open the dashboard with:
 
 ```console
 herdr plugin action invoke open --plugin local.agentsview
 ```
 
-For a configured standalone terminal, set `HERDR_PLUGIN_CONFIG_DIR` to the
-directory containing `config.toml`, expose the same runtime token, and run
-`nix run . -- tui`.
+For a standalone terminal from a local checkout, set `HERDR_PLUGIN_CONFIG_DIR`
+to the directory containing `config.toml`, expose the same runtime token, and
+run `cargo run --release -- tui`.
+
+## Demo
+
+Nix users can run an isolated synthetic dashboard without an AgentsView or
+Herdr setup:
+
+```console
+nix run .#demo
+```
 
 ## Platforms
 
