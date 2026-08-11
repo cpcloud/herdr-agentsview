@@ -1,7 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Phillip Cloud
+#
+# SPDX-License-Identifier: Apache-2.0
+
 [package]
 name = "herdr-agentsview"
 version = "0.1.0"
+authors = ["Phillip Cloud"]
 edition = "2021"
+license = "Apache-2.0"
 
 [[example]]
 name = "fake_agentsview"

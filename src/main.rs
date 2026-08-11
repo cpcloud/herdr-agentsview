@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use clap::Parser;
 use herdr_agentsview::config::PluginConfig;
 use herdr_agentsview::{herdr, tui};

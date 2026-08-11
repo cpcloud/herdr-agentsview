@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Phillip Cloud
+#
+# SPDX-License-Identifier: Apache-2.0
+
 {
   description = "AgentsView activity, compressed into one very busy terminal.";
 

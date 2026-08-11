@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use chrono::{DateTime, FixedOffset, LocalResult, Offset, TimeZone};
 use chrono_tz::Tz;
 

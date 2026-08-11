@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;

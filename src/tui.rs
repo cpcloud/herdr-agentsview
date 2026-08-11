@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Phillip Cloud
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use std::ffi::OsStr;
 use std::io;
 use std::time::{Duration, Instant};

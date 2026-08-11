@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Phillip Cloud
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # herdr-agentsview
 
 <!-- HTML is required because GitHub Markdown has no image-sizing syntax. -->
