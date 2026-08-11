@@ -109,22 +109,22 @@ fn render_category(
         buffer,
     );
 
-    let rows = rows(app, category);
-    let maximum = rows
+    let category_rows = rows(app, category);
+    let maximum = category_rows
         .iter()
         .map(|row| metric(row, app.breakdown_value()).0)
         .fold(0.0_f64, f64::max);
-    for (index, row) in rows
-        .iter()
-        .take(usize::from(area.height.saturating_sub(1)))
-        .enumerate()
-    {
+    let visible_count = usize::from(area.height.saturating_sub(1)).min(category_rows.len());
+    let visible_rows = &category_rows[..visible_count];
+    let value_width = breakdown_value_width(visible_rows, app.breakdown_value());
+    for (index, row) in visible_rows.iter().enumerate() {
         let y = area.y + 1 + index as u16;
         let line = breakdown_line(
             row,
             app.breakdown_value(),
             maximum,
             usize::from(area.width).saturating_sub(1),
+            value_width,
             palette,
         );
         Paragraph::new(line).render(Rect::new(area.x + 1, y, area.width - 1, 1), buffer);
@@ -147,14 +147,11 @@ fn breakdown_line(
     value: BreakdownValue,
     maximum: f64,
     width: usize,
+    value_width: usize,
     palette: Palette,
 ) -> Line<'static> {
     let (total, interactive, automated) = metric(row, value);
-    let label = match value {
-        BreakdownValue::AgentMinutes => format_breakdown_minutes(total),
-        BreakdownValue::Cost => format_usd(row.cost),
-    };
-    let value_width = label.len().max(6);
+    let label = breakdown_value_label(row, value);
     let key_width = (width / 3).clamp(8, 18);
     let bar_width = width
         .saturating_sub(key_width)
@@ -190,6 +187,21 @@ fn breakdown_line(
         Span::raw(" "),
         Span::raw(pad_right(&label, value_width)),
     ])
+}
+
+fn breakdown_value_width(rows: &[KeyMinutes], value: BreakdownValue) -> usize {
+    rows.iter()
+        .map(|row| breakdown_value_label(row, value).len())
+        .max()
+        .unwrap_or(0)
+        .max(6)
+}
+
+fn breakdown_value_label(row: &KeyMinutes, value: BreakdownValue) -> String {
+    match value {
+        BreakdownValue::AgentMinutes => format_breakdown_minutes(row.agent_minutes),
+        BreakdownValue::Cost => format_usd(row.cost),
+    }
 }
 
 fn format_breakdown_minutes(value: f64) -> String {
@@ -238,10 +250,43 @@ fn category_name(category: BreakdownCategory) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::breakdown_line;
+    use ratatui::text::Line;
+
+    use super::{breakdown_line, breakdown_value_width};
     use crate::app::{BreakdownValue, ColorMode};
     use crate::render::style::Palette;
     use crate::wire::{KeyMinutes, Money};
+
+    #[test]
+    fn lower_cost_never_draws_a_longer_bar_across_a_label_width_boundary() {
+        // If each row budgets its own value label, crossing a thousands separator can make a
+        // smaller cost draw a longer bar than the category maximum.
+        let rows = [
+            cost_row("maximum", 1_000_000_000),
+            cost_row("lower", 950_000_000),
+        ];
+        let palette = Palette::new(ColorMode::Color);
+        let value_width = breakdown_value_width(&rows, BreakdownValue::Cost);
+
+        let maximum_line = breakdown_line(
+            &rows[0],
+            BreakdownValue::Cost,
+            1_000_000_000.0,
+            40,
+            value_width,
+            palette,
+        );
+        let lower_line = breakdown_line(
+            &rows[1],
+            BreakdownValue::Cost,
+            1_000_000_000.0,
+            40,
+            value_width,
+            palette,
+        );
+
+        assert!(bar_cells(&lower_line) < bar_cells(&maximum_line));
+    }
 
     #[test]
     fn minute_breakdowns_compact_only_values_at_least_one_thousand() {
@@ -270,6 +315,7 @@ mod tests {
                 BreakdownValue::AgentMinutes,
                 minutes,
                 40,
+                6,
                 Palette::new(ColorMode::Color),
             );
             let text = line
@@ -280,5 +326,27 @@ mod tests {
 
             assert!(text.contains(expected), "missing {expected:?} in {text:?}");
         }
+    }
+
+    fn cost_row(key: &str, microdollars: i64) -> KeyMinutes {
+        let cost = Money { microdollars };
+        KeyMinutes {
+            project_key: None,
+            key: key.to_owned(),
+            agent_minutes: 0.0,
+            cost,
+            automated_agent_minutes: 0.0,
+            interactive_agent_minutes: 0.0,
+            automated_cost: Money { microdollars: 0 },
+            interactive_cost: cost,
+        }
+    }
+
+    fn bar_cells(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .flat_map(|span| span.content.chars())
+            .filter(|character| matches!(character, '█' | '▓'))
+            .count()
     }
 }
