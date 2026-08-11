@@ -11,9 +11,14 @@
   rustPlatform,
   stdenv,
 }:
+let
+  cargoVersion = (lib.importTOML ../Cargo.toml).package.version;
+  pluginVersion = (lib.importTOML ../herdr-plugin.toml).version;
+in
+assert pluginVersion == cargoVersion;
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "herdr-agentsview";
-  version = (lib.importTOML ../Cargo.toml).package.version;
+  version = cargoVersion;
 
   src = lib.fileset.toSource {
     root = ../.;
@@ -44,9 +49,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
     plugin_root="$out/share/herdr/plugins/local-agentsview"
     mkdir -p "$plugin_root"
-    substitute ${../herdr-plugin.toml.in} "$plugin_root/herdr-plugin.toml" \
-      --replace-fail '@HERDR_AGENTSVIEW@' "$out/bin/herdr-agentsview" \
-      --replace-fail '@VERSION@' '${finalAttrs.version}'
+    substitute ${../herdr-plugin.toml} "$plugin_root/herdr-plugin.toml" \
+      --replace-fail './target/release/herdr-agentsview' "$out/bin/herdr-agentsview"
   '';
 
   postFixup = ''
