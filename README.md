@@ -49,6 +49,19 @@ directory containing `config.toml`, expose the same runtime token, and run
 
 x86_64 Linux, aarch64 Linux, and aarch64 macOS.
 
+## Dependency Updates
+
+Renovate runs weekly and can also be started manually. Before the workflow's
+first run, create an expiring fine-grained personal access token scoped only to
+this repository and save it as the `RENOVATE_TOKEN` Actions secret. Grant the
+repository permissions Renovate documents for a fine-grained token:
+
+- Commit statuses, contents, issues, pull requests, and workflows: read and write
+- Dependabot alerts: read-only
+
+For an organization-owned token, also grant read-only Members permission. No
+GitHub App or repository setting change is required.
+
 ## Keys
 
 - `Tab` / `Shift-Tab`: move focus
