@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
-const READY_REPORT: &str = include_str!("../tests/fixtures/report-v5.json");
+const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v5.json");
 const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v5.json");
 const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v5.json");
 const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v5.json");
@@ -260,19 +260,16 @@ fn align_report_date(
     let timezone = timezone_name
         .parse::<Tz>()
         .with_context(|| format!("parse fake report timezone {timezone_name}"))?;
-    let delta = requested.map_or(Ok(TimeDelta::zero()), |requested| {
-        let requested = NaiveDate::parse_from_str(requested, "%Y-%m-%d")
-            .context("parse requested fake report date")?;
-        let local_time = report.range_start.with_timezone(&source_timezone).time();
-        let local_start = requested.and_time(local_time);
-        let shifted_start = timezone
-            .from_local_datetime(&local_start)
-            .single()
-            .context("resolve fake report date in timezone")?;
-        Ok::<_, anyhow::Error>(
-            shifted_start.with_timezone(&Utc) - report.range_start.with_timezone(&Utc),
-        )
+    let source_start = report.range_start.with_timezone(&source_timezone);
+    let requested_date = requested.map_or(Ok(source_start.date_naive()), |requested| {
+        NaiveDate::parse_from_str(requested, "%Y-%m-%d").context("parse requested fake report date")
     })?;
+    let local_start = requested_date.and_time(source_start.time());
+    let shifted_start = timezone
+        .from_local_datetime(&local_start)
+        .single()
+        .context("resolve fake report date in timezone")?;
+    let delta = shifted_start.with_timezone(&Utc) - report.range_start.with_timezone(&Utc);
     report.timezone = timezone;
     report.range_start = shift_timestamp(report.range_start, delta);
     report.range_end = shift_timestamp(report.range_end, delta);
@@ -475,16 +472,29 @@ mod tests {
     use super::{scenario_for_query, scenario_report, ReportScenario};
 
     #[test]
-    fn default_query_selects_the_populated_contract_fixture() {
-        // If the API's explicit `all` value is mistaken for a filter, the standalone dashboard
-        // opens empty and cannot exercise its populated layout.
+    fn default_query_selects_a_busy_workday_fixture() {
+        // If the default report becomes sparse or internally inconsistent, the standalone demo
+        // no longer exercises the populated dashboard users see during a real workday.
         let query = BTreeMap::from([("automation".to_owned(), "all".to_owned())]);
 
         let report = scenario_report(&query).unwrap();
+        let first_active = report
+            .by_session
+            .iter()
+            .filter_map(|session| session.first_active)
+            .min()
+            .unwrap();
+        let last_active = report
+            .by_session
+            .iter()
+            .filter_map(|session| session.last_active)
+            .max()
+            .unwrap();
 
         assert_eq!(scenario_for_query(&query), ReportScenario::Ready);
-        assert_eq!(report.totals.sessions, 3);
-        assert_eq!(report.by_session.len(), 3);
+        assert_eq!(report.totals.sessions, report.by_session.len());
+        assert!(report.by_session.len() >= 10);
+        assert!(last_active - first_active >= TimeDelta::hours(6));
     }
 
     #[test]
