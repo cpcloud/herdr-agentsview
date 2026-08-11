@@ -33,7 +33,7 @@ pub struct KeyHint {
 }
 
 impl App {
-    pub fn handle_input(&mut self, key: InputKey, today: NaiveDate) -> Vec<AppCommand> {
+    pub fn handle_input(&mut self, key: InputKey, today: NaiveDate) -> Option<AppCommand> {
         if key == InputKey::Quit
             || (key == InputKey::Char('q')
                 && !self
@@ -41,13 +41,13 @@ impl App {
                     .as_ref()
                     .is_some_and(|popup| popup.is_searchable()))
         {
-            return vec![AppCommand::Quit];
+            return Some(AppCommand::Quit);
         }
         if self.help_open {
             if matches!(key, InputKey::Escape | InputKey::Char('?')) {
                 self.help_open = false;
             }
-            return Vec::new();
+            return None;
         }
         if self.popup.is_some() {
             return self.handle_popup_input(key);
@@ -76,7 +76,7 @@ impl App {
             InputKey::Char('a') => self.select_compact_breakdown(BreakdownCategory::Agent),
             _ => return self.handle_focused_input(key, today),
         }
-        Vec::new()
+        None
     }
 
     pub fn help_open(&self) -> bool {
@@ -158,7 +158,7 @@ impl App {
         hints
     }
 
-    fn handle_popup_input(&mut self, key: InputKey) -> Vec<AppCommand> {
+    fn handle_popup_input(&mut self, key: InputKey) -> Option<AppCommand> {
         let searchable = self
             .popup
             .as_ref()
@@ -180,10 +180,10 @@ impl App {
             }
             _ => {}
         }
-        Vec::new()
+        None
     }
 
-    fn handle_focused_input(&mut self, key: InputKey, today: NaiveDate) -> Vec<AppCommand> {
+    fn handle_focused_input(&mut self, key: InputKey, today: NaiveDate) -> Option<AppCommand> {
         match self.focus {
             Focus::Date => {
                 let changed = match key {
@@ -227,25 +227,25 @@ impl App {
                 _ => {}
             },
         }
-        Vec::new()
+        None
     }
 
-    fn refresh_or_retry(&mut self) -> Vec<AppCommand> {
+    fn refresh_or_retry(&mut self) -> Option<AppCommand> {
         if let Some(kind) = self.failed_metadata_for_focus() {
-            return vec![self.retry_metadata(kind)];
+            return Some(self.retry_metadata(kind));
         }
         if self.has_in_flight_report() {
-            return Vec::new();
+            return None;
         }
         if let Some(request) = self.begin_refresh() {
-            vec![AppCommand::FetchReport(request)]
+            Some(AppCommand::FetchReport(request))
         } else {
             self.foreground_command()
         }
     }
 
-    fn foreground_command(&mut self) -> Vec<AppCommand> {
-        vec![AppCommand::FetchReport(self.begin_foreground_load())]
+    fn foreground_command(&mut self) -> Option<AppCommand> {
+        Some(AppCommand::FetchReport(self.begin_foreground_load()))
     }
 
     fn select_compact_breakdown(&mut self, category: BreakdownCategory) {

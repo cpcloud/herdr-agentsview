@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
-use herdr_agentsview::app::{App, BreakdownValue, Focus, InputKey, RuntimeEvent};
+use herdr_agentsview::app::{App, BreakdownValue, Focus, InputKey};
 use herdr_agentsview::render::{self, ColorMode, LayoutClass, TerminalCapabilities};
 use herdr_agentsview::wire::{Automation, Money, ProjectInfo};
 use ratatui::layout::Rect;
@@ -259,10 +259,10 @@ fn project_picker_renders_a_no_match_state() {
     // If a fuzzy query has no results but the menu renders as a blank box, operators cannot
     // distinguish a completed search from a drawing failure.
     let mut app = ready_app(ColorMode::Monochrome);
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![ProjectInfo {
+    app.apply_projects(Ok(vec![ProjectInfo {
         name: "project-alpha".to_owned(),
         session_count: 1,
-    }])));
+    }]));
     app.set_focus(Focus::Project);
     app.handle_input(InputKey::Enter, activity::selection().date);
     for key in "zzz".chars() {
@@ -731,9 +731,8 @@ fn long_stale_status_keeps_one_complete_activity_title() {
     // If header alignment round-trips through an ellipsized title string, a long stale
     // error duplicates a partial Activity label and steals cells from the status.
     let mut app = ready_app(ColorMode::Monochrome);
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     app.apply_report(
-        refresh.generation,
         Err(ApiError {
             kind: ApiErrorKind::Server,
             message: "server error ".repeat(4),
@@ -810,7 +809,7 @@ fn long_filter_popup_scrolls_the_selected_choice_into_a_cleared_viewport() {
             session_count: index,
         })
         .collect();
-    app.apply_event(RuntimeEvent::Projects(Ok(projects)));
+    app.apply_projects(Ok(projects));
     app.set_project(Some("project-30".to_owned()));
     app.set_focus(Focus::Project);
     app.handle_input(InputKey::Enter, activity::selection().date);

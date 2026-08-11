@@ -20,38 +20,21 @@ pub use sessions::{SessionSortColumn, SortDirection};
 
 use sessions::SessionState;
 
-/// Controls whether a request keeps the last good report mounted while it loads.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequestKind {
-    Foreground,
-    Refresh,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReportRequest {
-    pub generation: u64,
-    pub kind: RequestKind,
-    pub selection: ReportSelection,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppCommand {
-    FetchReport(ReportRequest),
+    FetchReport(ReportSelection),
     FetchMetadata(MetadataKind),
     Quit,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReportState {
-    InitialLoading {
-        generation: Option<u64>,
-    },
+    InitialLoading,
     Ready {
         report: Box<Report>,
         received_at: DateTime<Utc>,
     },
     Refreshing {
-        generation: u64,
         report: Box<Report>,
         received_at: DateTime<Utc>,
     },
@@ -68,18 +51,6 @@ pub enum Loadable<T> {
     Loading,
     Ready(T),
     Failed(ApiError),
-}
-
-#[derive(Debug)]
-pub enum RuntimeEvent {
-    Report {
-        generation: u64,
-        result: Result<Box<Report>, ApiError>,
-        received_at: DateTime<Utc>,
-    },
-    Projects(Result<Vec<ProjectInfo>, ApiError>),
-    Agents(Result<Vec<AgentInfo>, ApiError>),
-    Machines(Result<Vec<String>, ApiError>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -104,7 +75,6 @@ pub enum ColorMode {
 pub struct App {
     selection: ReportSelection,
     refresh_interval: Duration,
-    generation_counter: u64,
     report_state: ReportState,
     projects: Loadable<Vec<ProjectInfo>>,
     agents: Loadable<Vec<AgentInfo>>,
@@ -126,8 +96,7 @@ impl App {
         Self {
             selection,
             refresh_interval,
-            generation_counter: 0,
-            report_state: ReportState::InitialLoading { generation: None },
+            report_state: ReportState::InitialLoading,
             projects: Loadable::Loading,
             agents: Loadable::Loading,
             machines: Loadable::Loading,
@@ -161,7 +130,7 @@ impl App {
             ReportState::Ready { report, .. }
             | ReportState::Refreshing { report, .. }
             | ReportState::Stale { report, .. } => Some(report),
-            ReportState::InitialLoading { .. } | ReportState::Failed(_) => None,
+            ReportState::InitialLoading | ReportState::Failed(_) => None,
         }
     }
 
@@ -170,26 +139,16 @@ impl App {
             .is_some_and(|report| report.totals.sessions == 0)
     }
 
-    pub fn begin_foreground_load(&mut self) -> ReportRequest {
-        let generation = self.next_generation();
-        self.report_state = ReportState::InitialLoading {
-            generation: Some(generation),
-        };
+    pub fn begin_foreground_load(&mut self) -> ReportSelection {
+        self.report_state = ReportState::InitialLoading;
         self.timeline_cursor = 0;
         self.timeline_inspection_active = false;
         self.sessions.reset_position();
-        ReportRequest {
-            generation,
-            kind: RequestKind::Foreground,
-            selection: self.selection.clone(),
-        }
+        self.selection.clone()
     }
 
-    pub fn begin_refresh(&mut self) -> Option<ReportRequest> {
-        let previous = std::mem::replace(
-            &mut self.report_state,
-            ReportState::InitialLoading { generation: None },
-        );
+    pub fn begin_refresh(&mut self) -> Option<ReportSelection> {
+        let previous = std::mem::replace(&mut self.report_state, ReportState::InitialLoading);
         let (report, received_at) = match previous {
             ReportState::Ready {
                 report,
@@ -205,20 +164,14 @@ impl App {
                 return None;
             }
         };
-        let generation = self.next_generation();
         self.report_state = ReportState::Refreshing {
-            generation,
             report,
             received_at,
         };
-        Some(ReportRequest {
-            generation,
-            kind: RequestKind::Refresh,
-            selection: self.selection.clone(),
-        })
+        Some(self.selection.clone())
     }
 
-    pub fn begin_scheduled_load(&mut self) -> Option<ReportRequest> {
+    pub fn begin_scheduled_load(&mut self) -> Option<ReportSelection> {
         let retry_transient_failure = matches!(
             self.report_state,
             ReportState::Failed(ApiError {
@@ -232,66 +185,30 @@ impl App {
         self.begin_refresh()
     }
 
-    pub fn supersede_pending_load(&mut self) -> Option<ReportRequest> {
-        let previous = std::mem::replace(
-            &mut self.report_state,
-            ReportState::InitialLoading { generation: None },
-        );
-        let (generation, kind) = match previous {
-            ReportState::InitialLoading {
-                generation: Some(_),
-            } => {
-                let generation = self.next_generation();
-                self.report_state = ReportState::InitialLoading {
-                    generation: Some(generation),
-                };
-                (generation, RequestKind::Foreground)
-            }
-            ReportState::Refreshing {
-                report,
-                received_at,
-                ..
-            } => {
-                let generation = self.next_generation();
-                self.report_state = ReportState::Refreshing {
-                    generation,
-                    report,
-                    received_at,
-                };
-                (generation, RequestKind::Refresh)
-            }
-            state => {
-                self.report_state = state;
-                return None;
-            }
-        };
-        Some(ReportRequest {
-            generation,
-            kind,
-            selection: self.selection.clone(),
-        })
+    pub fn supersede_pending_load(&self) -> Option<ReportSelection> {
+        matches!(
+            self.report_state,
+            ReportState::InitialLoading | ReportState::Refreshing { .. }
+        )
+        .then(|| self.selection.clone())
     }
 
     pub fn apply_report(
         &mut self,
-        generation: u64,
         result: Result<Box<Report>, ApiError>,
         received_at: DateTime<Utc>,
     ) {
-        if self.pending_generation() != Some(generation) {
+        if !self.has_in_flight_report() {
             return;
         }
         let selected_session_id = match &result {
             Ok(_) => self.selected_session_id(),
             Err(_) => None,
         };
-        let previous = std::mem::replace(
-            &mut self.report_state,
-            ReportState::InitialLoading { generation: None },
-        );
-        let initial_load = matches!(&previous, ReportState::InitialLoading { .. });
+        let previous = std::mem::replace(&mut self.report_state, ReportState::InitialLoading);
+        let initial_load = matches!(&previous, ReportState::InitialLoading);
         match (previous, result) {
-            (ReportState::InitialLoading { .. }, Ok(report))
+            (ReportState::InitialLoading, Ok(report))
             | (ReportState::Refreshing { .. }, Ok(report)) => {
                 if self.timeline_inspection_active && self.timeline_cursor >= report.buckets.len() {
                     self.timeline_inspection_active = false;
@@ -322,24 +239,23 @@ impl App {
                     error,
                 };
             }
-            (ReportState::InitialLoading { .. }, Err(error)) => {
+            (ReportState::InitialLoading, Err(error)) => {
                 self.report_state = ReportState::Failed(error);
             }
-            _ => unreachable!("pending generation belongs to a loading report state"),
+            _ => unreachable!("report completion belongs to a loading report state"),
         }
     }
 
-    pub fn apply_event(&mut self, event: RuntimeEvent) {
-        match event {
-            RuntimeEvent::Report {
-                generation,
-                result,
-                received_at,
-            } => self.apply_report(generation, result, received_at),
-            RuntimeEvent::Projects(result) => self.projects = result.into(),
-            RuntimeEvent::Agents(result) => self.agents = result.into(),
-            RuntimeEvent::Machines(result) => self.machines = result.into(),
-        }
+    pub fn apply_projects(&mut self, result: Result<Vec<ProjectInfo>, ApiError>) {
+        self.projects = result.into();
+    }
+
+    pub fn apply_agents(&mut self, result: Result<Vec<AgentInfo>, ApiError>) {
+        self.agents = result.into();
+    }
+
+    pub fn apply_machines(&mut self, result: Result<Vec<String>, ApiError>) {
+        self.machines = result.into();
     }
 
     pub fn projects(&self) -> &Loadable<Vec<ProjectInfo>> {
@@ -443,24 +359,11 @@ impl App {
         self.color_mode
     }
 
-    fn next_generation(&mut self) -> u64 {
-        self.generation_counter = self
-            .generation_counter
-            .checked_add(1)
-            .expect("Activity request generation exhausted");
-        self.generation_counter
-    }
-
-    fn pending_generation(&self) -> Option<u64> {
-        match &self.report_state {
-            ReportState::InitialLoading { generation } => *generation,
-            ReportState::Refreshing { generation, .. } => Some(*generation),
-            ReportState::Ready { .. } | ReportState::Stale { .. } | ReportState::Failed(_) => None,
-        }
-    }
-
     pub(crate) fn has_in_flight_report(&self) -> bool {
-        self.pending_generation().is_some()
+        matches!(
+            self.report_state,
+            ReportState::InitialLoading | ReportState::Refreshing { .. }
+        )
     }
 
     pub(crate) fn move_breakdown(&mut self, delta: isize) {

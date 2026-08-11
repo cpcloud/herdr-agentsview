@@ -26,9 +26,8 @@ pub(super) fn render(
     } else if let Some(popup) = app.popup() {
         let searchable = popup.is_searchable();
         let max_label = popup
-            .labels
-            .iter()
-            .map(|label| UnicodeWidthStr::width(label.as_str()))
+            .labels()
+            .map(UnicodeWidthStr::width)
             .max()
             .unwrap_or(0);
         let query_width = UnicodeWidthStr::width(popup.query.as_str()) + 12;
@@ -40,7 +39,7 @@ pub(super) fn render(
         let width = (max_label.max(query_width) as u16 + 6)
             .max(selector_width)
             .clamp(24, area.width);
-        let content_height = popup.labels.len() as u16 + u16::from(searchable);
+        let content_height = popup.len() as u16 + u16::from(searchable);
         let height = (content_height + 2)
             .max(3 + u16::from(searchable))
             .min(area.height.saturating_sub(3));
@@ -72,16 +71,15 @@ pub(super) fn render(
         let start = popup
             .selected
             .saturating_sub(visible / 2)
-            .min(popup.labels.len().saturating_sub(visible));
-        let lines = if popup.labels.is_empty() {
+            .min(popup.len().saturating_sub(visible));
+        let lines = if popup.is_empty() {
             vec![Line::from(Span::styled(
                 "No matching projects",
                 palette.muted(),
             ))]
         } else {
             popup
-                .labels
-                .iter()
+                .labels()
                 .enumerate()
                 .skip(start)
                 .take(visible)

@@ -40,7 +40,7 @@ pub(super) fn render_header(
     let status_style = match app.report_state() {
         ReportState::Stale { .. } => palette.warning(),
         ReportState::Failed(_) => palette.error(),
-        ReportState::InitialLoading { .. }
+        ReportState::InitialLoading
         | ReportState::Ready { .. }
         | ReportState::Refreshing { .. } => palette.muted(),
     };
@@ -151,64 +151,75 @@ fn filter_spans(
     width: usize,
     palette: Palette,
 ) -> Vec<Span<'static>> {
-    let compact = class == LayoutClass::Compact;
-    let labels = if compact {
-        ["Date", "Proj", "Agent", "Host", "Session"]
-    } else {
-        ["Date", "Project", "Agent", "Machine", "Session"]
-    };
-    let values = [
-        app.selection().date.to_string(),
-        metadata_value(app.selection().project.as_deref(), app.projects(), compact),
-        metadata_value(app.selection().agent.as_deref(), app.agents(), compact),
-        metadata_value(app.selection().machine.as_deref(), app.machines(), compact),
-        match app.selection().automation {
-            Automation::All => "All".to_owned(),
-            Automation::Interactive => "Interactive".to_owned(),
-            Automation::Automated => "Automated".to_owned(),
-        },
-    ];
-    let focuses = [
-        Focus::Date,
-        Focus::Project,
-        Focus::Agent,
-        Focus::Machine,
-        Focus::Automation,
-    ];
-    let failures = [
-        false,
-        matches!(app.projects(), Loadable::Failed(_)),
-        matches!(app.agents(), Loadable::Failed(_)),
-        matches!(app.machines(), Loadable::Failed(_)),
-        false,
-    ];
-    let labels_and_separators = labels
-        .iter()
-        .map(|label| UnicodeWidthStr::width(*label) + 1)
-        .sum::<usize>()
-        + labels.len().saturating_sub(1) * 3;
-    let available = width.saturating_sub(labels_and_separators);
-    let value_widths = filter_value_widths(available, &values);
-    let mut spans = Vec::new();
-    for index in 0..labels.len() {
+    let tokens = filter_tokens(app, class, width, palette);
+    let mut spans = Vec::with_capacity(tokens.len() * 2 - 1);
+    for (index, token) in tokens.into_iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" · ", palette.muted()));
         }
-        let value = clip_with_ellipsis(&values[index], value_widths[index]);
-        let token = format!("{} {value}", labels[index]);
-        let focused = app.focus() == focuses[index];
-        let style = if failures[index] && focused {
-            palette.focused_warning()
-        } else if failures[index] {
-            palette.warning()
-        } else if focused {
-            palette.selected()
-        } else {
-            Style::default()
-        };
-        spans.push(Span::styled(token, style));
+        spans.push(token.span);
     }
     spans
+}
+
+struct FilterView {
+    focus: Focus,
+    full_label: &'static str,
+    compact_label: &'static str,
+    value: String,
+    failed: bool,
+}
+
+impl FilterView {
+    fn label(&self, class: LayoutClass) -> &'static str {
+        if class == LayoutClass::Compact {
+            self.compact_label
+        } else {
+            self.full_label
+        }
+    }
+}
+
+struct FilterToken {
+    focus: Focus,
+    span: Span<'static>,
+}
+
+fn filter_tokens(
+    app: &App,
+    class: LayoutClass,
+    width: usize,
+    palette: Palette,
+) -> Vec<FilterToken> {
+    let views = filter_views(app, class == LayoutClass::Compact);
+    let labels_and_separators = views
+        .iter()
+        .map(|view| UnicodeWidthStr::width(view.label(class)) + 1)
+        .sum::<usize>()
+        + views.len().saturating_sub(1) * 3;
+    let available = width.saturating_sub(labels_and_separators);
+    let value_widths = filter_value_widths(available, &views);
+    views
+        .into_iter()
+        .zip(value_widths)
+        .map(|(view, value_width)| {
+            let value = clip_with_ellipsis(&view.value, value_width);
+            let focused = app.focus() == view.focus;
+            let style = if view.failed && focused {
+                palette.focused_warning()
+            } else if view.failed {
+                palette.warning()
+            } else if focused {
+                palette.selected()
+            } else {
+                Style::default()
+            };
+            FilterToken {
+                focus: view.focus,
+                span: Span::styled(format!("{} {value}", view.label(class)), style),
+            }
+        })
+        .collect()
 }
 
 pub(super) fn filter_anchor(
@@ -217,28 +228,64 @@ pub(super) fn filter_anchor(
     width: usize,
     focus: Focus,
 ) -> Option<(u16, u16)> {
-    let index = match focus {
-        Focus::Date => 0,
-        Focus::Project => 1,
-        Focus::Agent => 2,
-        Focus::Machine => 3,
-        Focus::Automation => 4,
-        Focus::Timeline | Focus::Sessions | Focus::Breakdowns => return None,
-    };
-    let spans = filter_spans(app, class, width, Palette::new(app.color_mode()));
-    let token_index = index * 2;
-    let x = spans
+    let tokens = filter_tokens(app, class, width, Palette::new(app.color_mode()));
+    let index = tokens.iter().position(|token| token.focus == focus)?;
+    let x = tokens
         .iter()
-        .take(token_index)
-        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .take(index)
+        .map(|token| UnicodeWidthStr::width(token.span.content.as_ref()) + 3)
         .sum::<usize>();
-    let token_width = UnicodeWidthStr::width(spans.get(token_index)?.content.as_ref());
+    let token_width = UnicodeWidthStr::width(tokens.get(index)?.span.content.as_ref());
     Some((x as u16, token_width as u16))
 }
 
-fn filter_value_widths(available: usize, values: &[String; 5]) -> [usize; 5] {
+fn filter_views(app: &App, compact: bool) -> [FilterView; 5] {
+    [
+        FilterView {
+            focus: Focus::Date,
+            full_label: "Date",
+            compact_label: "Date",
+            value: app.selection().date.to_string(),
+            failed: false,
+        },
+        FilterView {
+            focus: Focus::Project,
+            full_label: "Project",
+            compact_label: "Proj",
+            value: metadata_value(app.selection().project.as_deref(), app.projects(), compact),
+            failed: matches!(app.projects(), Loadable::Failed(_)),
+        },
+        FilterView {
+            focus: Focus::Agent,
+            full_label: "Agent",
+            compact_label: "Agent",
+            value: metadata_value(app.selection().agent.as_deref(), app.agents(), compact),
+            failed: matches!(app.agents(), Loadable::Failed(_)),
+        },
+        FilterView {
+            focus: Focus::Machine,
+            full_label: "Machine",
+            compact_label: "Host",
+            value: metadata_value(app.selection().machine.as_deref(), app.machines(), compact),
+            failed: matches!(app.machines(), Loadable::Failed(_)),
+        },
+        FilterView {
+            focus: Focus::Automation,
+            full_label: "Session",
+            compact_label: "Session",
+            value: match app.selection().automation {
+                Automation::All => "All".to_owned(),
+                Automation::Interactive => "Interactive".to_owned(),
+                Automation::Automated => "Automated".to_owned(),
+            },
+            failed: false,
+        },
+    ]
+}
+
+fn filter_value_widths(available: usize, views: &[FilterView; 5]) -> [usize; 5] {
     let natural: [usize; 5] =
-        std::array::from_fn(|index| UnicodeWidthStr::width(values[index].as_str()));
+        std::array::from_fn(|index| UnicodeWidthStr::width(views[index].value.as_str()));
     let minimum = [10, 3, 3, 3, 3];
     let mut widths = std::array::from_fn(|index| natural[index].min(minimum[index]));
     let mut remaining = available.saturating_sub(widths.iter().sum());
@@ -288,7 +335,7 @@ mod tests {
 
     use super::{filter_spans, render_footer, render_header};
     use crate::api::{ApiError, ApiErrorKind};
-    use crate::app::{App, Focus, RuntimeEvent};
+    use crate::app::{App, Focus};
     use crate::render::layout::LayoutClass;
     use crate::render::style::Palette;
     use crate::wire::ReportSelection;
@@ -362,10 +409,10 @@ mod tests {
         // If warning styling replaces selected styling, a failed selector has no visible
         // response to Tab and the retry target becomes ambiguous.
         let mut app = app();
-        app.apply_event(RuntimeEvent::Projects(Err(ApiError {
+        app.apply_projects(Err(ApiError {
             kind: ApiErrorKind::Network,
             message: "offline".to_owned(),
-        })));
+        }));
         app.set_focus(Focus::Project);
         let spans = filter_spans(
             &app,
@@ -404,10 +451,11 @@ mod tests {
         // If styled padding is not included in width selection, the final global shortcut is
         // clipped even though compact hint copy fits the supported terminal.
         let mut app = app();
+        app.begin_foreground_load();
         app.set_focus(Focus::Sessions);
         for (class, width, expected) in [
             (LayoutClass::Compact, 80, "q  quit"),
-            (LayoutClass::Medium, 120, "q  quit"),
+            (LayoutClass::Medium, 120, "q  close dashboard"),
             (LayoutClass::Wide, 200, "q  close dashboard"),
         ] {
             let area = Rect::new(0, 0, width, 1);

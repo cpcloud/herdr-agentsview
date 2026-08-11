@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, FixedOffset, Utc};
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
-use herdr_agentsview::app::{App, RuntimeEvent};
+use herdr_agentsview::app::App;
 use herdr_agentsview::render::ColorMode;
 use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report};
 
@@ -30,9 +30,8 @@ pub fn loading_app(color_mode: ColorMode) -> App {
 
 pub fn stale_partial_app(color_mode: ColorMode) -> App {
     let mut app = app_with_report(partial_report(), color_mode);
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     app.apply_report(
-        refresh.generation,
         Err(ApiError::timeout()),
         "2026-08-08T17:31:12Z".parse().unwrap(),
     );
@@ -49,9 +48,8 @@ pub fn authentication_error_app(color_mode: ColorMode) -> App {
 
 pub fn failed_app(kind: ApiErrorKind, message: &str, color_mode: ColorMode) -> App {
     let mut app = new_app(color_mode);
-    let request = app.begin_foreground_load();
+    app.begin_foreground_load();
     app.apply_report(
-        request.generation,
         Err(ApiError {
             kind,
             message: message.to_owned(),
@@ -63,10 +61,10 @@ pub fn failed_app(kind: ApiErrorKind, message: &str, color_mode: ColorMode) -> A
 
 pub fn metadata_degraded_app(color_mode: ColorMode) -> App {
     let mut app = ready_app(color_mode);
-    app.apply_event(RuntimeEvent::Projects(Err(ApiError {
+    app.apply_projects(Err(ApiError {
         kind: ApiErrorKind::Network,
         message: "projects unavailable".to_owned(),
-    })));
+    }));
     app
 }
 
@@ -115,9 +113,9 @@ pub fn assert_golden(path: &str, actual: &str) {
 
 pub fn app_with_report(value: Report, color_mode: ColorMode) -> App {
     let mut app = new_app(color_mode);
-    let request = app.begin_foreground_load();
-    app.apply_report(request.generation, Ok(Box::new(value)), received_at());
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value)), received_at());
+    app.apply_projects(Ok(vec![
         ProjectInfo {
             name: "project-alpha".to_owned(),
             session_count: 1,
@@ -126,8 +124,8 @@ pub fn app_with_report(value: Report, color_mode: ColorMode) -> App {
             name: "project-beta".to_owned(),
             session_count: 1,
         },
-    ])));
-    app.apply_event(RuntimeEvent::Agents(Ok(vec![
+    ]));
+    app.apply_agents(Ok(vec![
         AgentInfo {
             name: "codex".to_owned(),
             session_count: 2,
@@ -136,8 +134,8 @@ pub fn app_with_report(value: Report, color_mode: ColorMode) -> App {
             name: "reviewer".to_owned(),
             session_count: 1,
         },
-    ])));
-    app.apply_event(RuntimeEvent::Machines(Ok(vec!["machine-alpha".to_owned()])));
+    ]));
+    app.apply_machines(Ok(vec!["machine-alpha".to_owned()]));
     app
 }
 

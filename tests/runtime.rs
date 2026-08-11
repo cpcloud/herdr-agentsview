@@ -250,7 +250,7 @@ async fn initial_load_requests_report_and_all_metadata() {
 }
 
 #[tokio::test]
-async fn foreground_load_cancels_the_old_generation() {
+async fn foreground_load_cancels_the_old_request() {
     // If a superseded request survives, a slow old filter can overwrite the newest report.
     let server = RecordingServer::start().await;
     server.gate_report(1);
@@ -260,11 +260,13 @@ async fn foreground_load_cancels_the_old_generation() {
     runtime.start(&mut app);
     wait_until(|| server.state.report_count.load(Ordering::SeqCst) == 1).await;
 
-    let commands = app.handle_input(
-        InputKey::Right,
-        NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
-    );
-    runtime.dispatch_all(commands);
+    let command = app
+        .handle_input(
+            InputKey::Right,
+            NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
+        )
+        .expect("date change should request a report");
+    runtime.dispatch(command);
     wait_until(|| {
         runtime.drain_events(&mut app);
         app.report()
@@ -310,10 +312,13 @@ async fn scheduled_refresh_supersedes_an_unresponsive_report() {
     wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 1).await;
     assert_eq!(server.state.report_count.load(Ordering::SeqCst), 3);
 
-    runtime.dispatch_all(app.handle_input(
-        InputKey::Char('r'),
-        NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
-    ));
+    let command = app
+        .handle_input(
+            InputKey::Char('r'),
+            NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
+        )
+        .expect("manual refresh should request a report");
+    runtime.dispatch(command);
     wait_until(|| server.state.report_count.load(Ordering::SeqCst) == 4).await;
 }
 

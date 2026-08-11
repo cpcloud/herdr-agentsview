@@ -21,13 +21,11 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::api::ActivityClient;
-use crate::app::{
-    App, AppCommand, InputKey, MetadataKind, ReportRequest, ReportState, RuntimeEvent,
-};
+use crate::api::{ActivityClient, ApiError};
+use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState};
 use crate::config::PluginConfig;
 use crate::render::{self, TerminalCapabilities};
-use crate::wire::ReportSelection;
+use crate::wire::{AgentInfo, ProjectInfo, Report, ReportSelection};
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const STATUS_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
@@ -39,13 +37,21 @@ struct OwnedTask {
 
 enum Completion {
     Report {
-        generation: u64,
-        event: RuntimeEvent,
-    },
-    Metadata {
-        kind: MetadataKind,
         token: u64,
-        event: RuntimeEvent,
+        result: Result<Box<Report>, ApiError>,
+        received_at: chrono::DateTime<Utc>,
+    },
+    Projects {
+        token: u64,
+        result: Result<Vec<ProjectInfo>, ApiError>,
+    },
+    Agents {
+        token: u64,
+        result: Result<Vec<AgentInfo>, ApiError>,
+    },
+    Machines {
+        token: u64,
+        result: Result<Vec<String>, ApiError>,
     },
 }
 
@@ -57,7 +63,7 @@ pub struct Runtime {
     projects: Option<OwnedTask>,
     agents: Option<OwnedTask>,
     machines: Option<OwnedTask>,
-    metadata_token: u64,
+    task_token: u64,
     report_timeout_configured: bool,
     report_wait_intervals: u32,
     scheduled_supersessions: u32,
@@ -87,7 +93,7 @@ impl Runtime {
             projects: None,
             agents: None,
             machines: None,
-            metadata_token: 0,
+            task_token: 0,
             report_timeout_configured: config.request_timeout.is_some(),
             report_wait_intervals: 0,
             scheduled_supersessions: 0,
@@ -102,15 +108,6 @@ impl Runtime {
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Projects));
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Agents));
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Machines));
-    }
-
-    pub fn dispatch_all(&mut self, commands: impl IntoIterator<Item = AppCommand>) -> bool {
-        for command in commands {
-            if self.dispatch(command) {
-                return true;
-            }
-        }
-        false
     }
 
     pub fn dispatch(&mut self, command: AppCommand) -> bool {
@@ -149,63 +146,78 @@ impl Runtime {
         applied
     }
 
-    fn spawn_report(&mut self, request: ReportRequest) {
+    fn spawn_report(&mut self, selection: ReportSelection) {
         abort_task(&mut self.report);
+        let token = self.next_task_token();
         let client = self.client.clone();
         let sender = self.sender.clone();
-        let generation = request.generation;
         let handle = self.executor.spawn(async move {
-            let result = client.fetch_report(&request.selection).await.map(Box::new);
+            let result = client.fetch_report(&selection).await.map(Box::new);
             let _ = sender.send(Completion::Report {
-                generation,
-                event: RuntimeEvent::Report {
-                    generation,
-                    result,
-                    received_at: Utc::now(),
-                },
+                token,
+                result,
+                received_at: Utc::now(),
             });
         });
-        self.report = Some(OwnedTask {
-            token: generation,
-            handle,
-        });
+        self.report = Some(OwnedTask { token, handle });
     }
 
     fn spawn_metadata(&mut self, kind: MetadataKind) {
-        self.metadata_token = self.metadata_token.wrapping_add(1);
-        let token = self.metadata_token;
+        let token = self.next_task_token();
         let slot = self.metadata_slot_mut(kind);
         abort_task(slot);
         let client = self.client.clone();
         let sender = self.sender.clone();
         let handle = self.executor.spawn(async move {
-            let event = match kind {
-                MetadataKind::Projects => RuntimeEvent::Projects(client.fetch_projects().await),
-                MetadataKind::Agents => RuntimeEvent::Agents(client.fetch_agents().await),
-                MetadataKind::Machines => RuntimeEvent::Machines(client.fetch_machines().await),
+            let completion = match kind {
+                MetadataKind::Projects => Completion::Projects {
+                    token,
+                    result: client.fetch_projects().await,
+                },
+                MetadataKind::Agents => Completion::Agents {
+                    token,
+                    result: client.fetch_agents().await,
+                },
+                MetadataKind::Machines => Completion::Machines {
+                    token,
+                    result: client.fetch_machines().await,
+                },
             };
-            let _ = sender.send(Completion::Metadata { kind, token, event });
+            let _ = sender.send(completion);
         });
         *self.metadata_slot_mut(kind) = Some(OwnedTask { token, handle });
     }
 
     fn apply_completion(&mut self, app: &mut App, completion: Completion) -> bool {
         match completion {
-            Completion::Report { generation, event } => {
-                if self.report.as_ref().map(|task| task.token) != Some(generation) {
+            Completion::Report {
+                token,
+                result,
+                received_at,
+            } => {
+                if !take_current(&mut self.report, token) {
                     return false;
                 }
-                self.report = None;
                 self.reset_report_backoff();
-                app.apply_event(event);
+                app.apply_report(result, received_at);
             }
-            Completion::Metadata { kind, token, event } => {
-                let slot = self.metadata_slot_mut(kind);
-                if slot.as_ref().map(|task| task.token) != Some(token) {
+            Completion::Projects { token, result } => {
+                if !take_current(&mut self.projects, token) {
                     return false;
                 }
-                *slot = None;
-                app.apply_event(event);
+                app.apply_projects(result);
+            }
+            Completion::Agents { token, result } => {
+                if !take_current(&mut self.agents, token) {
+                    return false;
+                }
+                app.apply_agents(result);
+            }
+            Completion::Machines { token, result } => {
+                if !take_current(&mut self.machines, token) {
+                    return false;
+                }
+                app.apply_machines(result);
             }
         }
         true
@@ -219,7 +231,7 @@ impl Runtime {
         }
     }
 
-    fn scheduled_report_request(&mut self, app: &mut App) -> Option<ReportRequest> {
+    fn scheduled_report_request(&mut self, app: &mut App) -> Option<ReportSelection> {
         if self.report.is_none() {
             self.reset_report_backoff();
             return app.begin_scheduled_load();
@@ -244,6 +256,14 @@ impl Runtime {
         self.report_wait_intervals = 0;
         self.scheduled_supersessions = 0;
     }
+
+    fn next_task_token(&mut self) -> u64 {
+        self.task_token = self
+            .task_token
+            .checked_add(1)
+            .expect("Activity task token exhausted");
+        self.task_token
+    }
 }
 
 impl Drop for Runtime {
@@ -259,6 +279,14 @@ fn abort_task(task: &mut Option<OwnedTask>) {
     if let Some(task) = task.take() {
         task.handle.abort();
     }
+}
+
+fn take_current(task: &mut Option<OwnedTask>, token: u64) -> bool {
+    if task.as_ref().map(|task| task.token) != Some(token) {
+        return false;
+    }
+    *task = None;
+    true
 }
 
 pub fn run(config: PluginConfig) -> anyhow::Result<()> {
@@ -337,8 +365,10 @@ fn run_loop(
             Event::Key(key) if accepts_key_event(key) => {
                 let today = Utc::now().with_timezone(&timezone).date_naive();
                 if let Some(input) = map_key(key) {
-                    if runtime.dispatch_all(app.handle_input(input, today)) {
-                        return Ok(());
+                    if let Some(command) = app.handle_input(input, today) {
+                        if runtime.dispatch(command) {
+                            return Ok(());
+                        }
                     }
                     redraw_requested = true;
                 }
@@ -353,7 +383,7 @@ fn redraw_required(app: &App, state_changed: bool, clock_due: bool) -> bool {
     state_changed
         || matches!(
             app.report_state(),
-            ReportState::InitialLoading { .. } | ReportState::Refreshing { .. }
+            ReportState::InitialLoading | ReportState::Refreshing { .. }
         )
         || clock_due
             && matches!(
@@ -462,10 +492,14 @@ mod tests {
     use ratatui::layout::Rect;
 
     use crate::api::ApiError;
-    use crate::app::{App, InputKey};
+    use crate::app::{App, AppCommand, InputKey};
+    use crate::config::PluginConfig;
     use crate::wire::{Report, ReportSelection};
 
-    use super::{map_key, no_color_requested, redraw_required, synchronize_layout};
+    use super::{
+        map_key, no_color_requested, redraw_required, synchronize_layout, Completion, OwnedTask,
+        Runtime,
+    };
 
     #[test]
     fn empty_no_color_value_keeps_terminal_colors_enabled() {
@@ -506,9 +540,8 @@ mod tests {
         // If stale data does not share the freshness deadline, its age freezes even though
         // the warning remains mounted until a successful retry.
         let mut app = ready_app();
-        let request = app.begin_refresh().unwrap();
+        app.begin_refresh().unwrap();
         app.apply_report(
-            request.generation,
             Err(ApiError::timeout()),
             "2026-08-08T17:21:01Z".parse().unwrap(),
         );
@@ -535,11 +568,10 @@ mod tests {
             "America/New_York".parse().unwrap(),
         );
         let mut app = App::new(selection, Duration::from_secs(300));
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         let report: Report =
             serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
@@ -566,5 +598,66 @@ mod tests {
             map_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(InputKey::Quit)
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_report_completion_is_ignored_after_replacement_dispatch() {
+        // If replacement dispatch only aborts the old task without invalidating an already
+        // queued completion, the old report ends loading and causes the new result to be ignored.
+        let config = PluginConfig {
+            api_base_url: "http://127.0.0.1:9/".parse().unwrap(),
+            request_timeout: Some(Duration::from_secs(2)),
+            refresh_interval: Duration::from_secs(300),
+            timezone: "America/New_York".parse().unwrap(),
+            auth: None,
+        };
+        let selection = ReportSelection::new(
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            config.timezone,
+        );
+        let mut app = App::new(selection, config.refresh_interval);
+        app.begin_foreground_load();
+        let mut runtime = Runtime::new(&config).unwrap();
+        let first_token = runtime.next_task_token();
+        runtime.report = Some(OwnedTask {
+            token: first_token,
+            handle: tokio::spawn(std::future::pending()),
+        });
+        let mut first_report: Report =
+            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
+        first_report.totals.sessions = 41;
+        runtime
+            .sender
+            .send(Completion::Report {
+                token: first_token,
+                result: Ok(Box::new(first_report)),
+                received_at: "2026-08-08T17:21:00Z".parse().unwrap(),
+            })
+            .unwrap();
+        assert!(!runtime.receiver.is_empty());
+
+        app.set_project(Some("project-beta".to_owned()));
+        let replacement = app.begin_foreground_load();
+        assert!(!runtime.dispatch(AppCommand::FetchReport(replacement)));
+        let replacement_token = runtime.report.as_ref().unwrap().token;
+        runtime.report.as_ref().unwrap().handle.abort();
+
+        assert_eq!(runtime.drain_events(&mut app), 0);
+        assert!(app.report().is_none());
+
+        let mut replacement_report: Report =
+            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
+        replacement_report.totals.sessions = 42;
+        runtime
+            .sender
+            .send(Completion::Report {
+                token: replacement_token,
+                result: Ok(Box::new(replacement_report)),
+                received_at: "2026-08-08T17:22:00Z".parse().unwrap(),
+            })
+            .unwrap();
+
+        assert_eq!(runtime.drain_events(&mut app), 1);
+        assert_eq!(app.report().unwrap().totals.sessions, 42);
     }
 }
