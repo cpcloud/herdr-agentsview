@@ -7,7 +7,7 @@ use std::time::Duration;
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
 use herdr_agentsview::app::{
     App, AppCommand, BreakdownCategory, BreakdownValue, Focus, InputKey, Loadable, MetadataKind,
-    ReportState, RequestKind, RuntimeEvent, SessionSortColumn, SortDirection,
+    ReportState, SessionSortColumn, SortDirection,
 };
 use herdr_agentsview::wire::{ProjectInfo, ReportInterval};
 
@@ -40,16 +40,12 @@ fn initial_load_transitions_to_ready_without_invented_data() {
     // If the initial state contains a zero-shaped report, loading can look like a real
     // inactive day and later render paths cannot distinguish the two.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    assert!(matches!(
-        app.report_state(),
-        ReportState::InitialLoading { .. }
-    ));
+    assert!(matches!(app.report_state(), ReportState::InitialLoading));
     assert!(app.report().is_none());
 
-    let request = app.begin_foreground_load();
-    assert_eq!(request.kind, RequestKind::Foreground);
-    assert_eq!(request.selection, selection());
-    app.apply_report(request.generation, Ok(Box::new(report())), received_at());
+    let request_selection = app.begin_foreground_load();
+    assert_eq!(request_selection, selection());
+    app.apply_report(Ok(Box::new(report())), received_at());
 
     assert!(matches!(
         app.report_state(),
@@ -66,9 +62,9 @@ fn initial_timeline_cursor_starts_at_the_first_nonzero_bucket() {
     value.buckets[0].interactive_at_peak = 0;
     value.buckets[0].automated_at_peak = 0;
     let mut app = App::new(selection(), Duration::from_secs(300));
-    let request = app.begin_foreground_load();
+    app.begin_foreground_load();
 
-    app.apply_report(request.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert_eq!(app.timeline_cursor(), 1);
     app.toggle_timeline_inspection();
@@ -83,8 +79,8 @@ fn timeline_cursor_can_move_into_leading_zero_buckets_after_initial_positioning(
     value.buckets[0].interactive_at_peak = 0;
     value.buckets[0].automated_at_peak = 0;
     let mut app = App::new(selection(), Duration::from_secs(300));
-    let request = app.begin_foreground_load();
-    app.apply_report(request.generation, Ok(Box::new(value)), received_at());
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value)), received_at());
     app.toggle_timeline_inspection();
 
     app.move_timeline(-1);
@@ -100,44 +96,16 @@ fn refresh_preserves_an_active_slice_on_a_leading_zero_bucket() {
     value.buckets[0].interactive_at_peak = 0;
     value.buckets[0].automated_at_peak = 0;
     let mut app = App::new(selection(), Duration::from_secs(300));
-    let request = app.begin_foreground_load();
-    app.apply_report(
-        request.generation,
-        Ok(Box::new(value.clone())),
-        received_at(),
-    );
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value.clone())), received_at());
     app.toggle_timeline_inspection();
     app.move_timeline(-1);
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
 
-    app.apply_report(refresh.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert!(app.timeline_inspection_active());
     assert_eq!(app.timeline_cursor(), 0);
-}
-
-#[test]
-fn late_filter_response_cannot_replace_newer_selection() {
-    // If a cancelled filter request wins a race, the filters and report describe different
-    // populations while both appear internally valid.
-    let mut app = App::new(selection(), Duration::from_secs(300));
-    let first = app.begin_foreground_load();
-    app.set_project(Some("project-beta".to_owned()));
-    let second = app.begin_foreground_load();
-    let mut first_report = report();
-    first_report.by_project[0].key = "project-alpha".to_owned();
-    let mut second_report = report();
-    second_report.by_project[0].key = "project-beta".to_owned();
-
-    app.apply_report(first.generation, Ok(Box::new(first_report)), received_at());
-    assert!(app.report().is_none());
-    app.apply_report(
-        second.generation,
-        Ok(Box::new(second_report)),
-        received_at(),
-    );
-
-    assert_eq!(app.report().unwrap().by_project[0].key, "project-beta");
 }
 
 #[test]
@@ -145,9 +113,9 @@ fn refresh_retains_data_and_rejects_overlap() {
     // If refresh hides the last good report or overlaps itself, a healthy dashboard flickers
     // and can accumulate redundant requests on slow links.
     let mut app = ready_app();
-    let request = app.begin_refresh().unwrap();
+    let request_selection = app.begin_refresh().unwrap();
 
-    assert_eq!(request.kind, RequestKind::Refresh);
+    assert_eq!(request_selection, *app.selection());
     assert!(app.report().is_some());
     assert!(matches!(app.report_state(), ReportState::Refreshing { .. }));
     assert!(app.begin_refresh().is_none());
@@ -155,18 +123,15 @@ fn refresh_retains_data_and_rejects_overlap() {
 
 #[test]
 fn rejected_refresh_preserves_the_active_request() {
-    // If rejecting an overlapping refresh loses the active generation, its valid response is
+    // If rejecting an overlapping refresh loses the active request, its valid response is
     // discarded and the dashboard remains stuck in a report-less loading state.
     let mut app = ready_app();
-    let request = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
 
     assert!(app.begin_refresh().is_none());
-    assert!(matches!(
-        app.report_state(),
-        ReportState::Refreshing { generation, .. } if *generation == request.generation
-    ));
+    assert!(matches!(app.report_state(), ReportState::Refreshing { .. }));
 
-    app.apply_report(request.generation, Ok(Box::new(report())), received_at());
+    app.apply_report(Ok(Box::new(report())), received_at());
 
     assert!(matches!(app.report_state(), ReportState::Ready { .. }));
 }
@@ -176,9 +141,9 @@ fn failed_refresh_keeps_last_good_report_and_marks_it_stale() {
     // If a refresh error drops the report, a transient network failure destroys the exact
     // data needed for a useful stale-data state.
     let mut app = ready_app();
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
 
-    app.apply_report(refresh.generation, Err(ApiError::timeout()), received_at());
+    app.apply_report(Err(ApiError::timeout()), received_at());
 
     assert!(matches!(
         app.report_state(),
@@ -197,12 +162,8 @@ fn foreground_failures_preserve_the_boundary_classification() {
         ApiErrorKind::Protocol,
     ] {
         let mut app = App::new(selection(), Duration::from_secs(300));
-        let request = app.begin_foreground_load();
-        app.apply_report(
-            request.generation,
-            Err(error(kind, "boundary failed")),
-            received_at(),
-        );
+        app.begin_foreground_load();
+        app.apply_report(Err(error(kind, "boundary failed")), received_at());
 
         assert!(matches!(
             app.report_state(),
@@ -222,17 +183,10 @@ fn scheduled_load_retries_only_transient_foreground_failures() {
         ApiErrorKind::Server,
     ] {
         let mut app = App::new(selection(), Duration::from_secs(300));
-        let request = app.begin_foreground_load();
-        app.apply_report(
-            request.generation,
-            Err(error(kind, "transient failure")),
-            received_at(),
-        );
+        app.begin_foreground_load();
+        app.apply_report(Err(error(kind, "transient failure")), received_at());
 
-        assert_eq!(
-            app.begin_scheduled_load().unwrap().kind,
-            RequestKind::Foreground
-        );
+        assert_eq!(app.begin_scheduled_load().unwrap(), *app.selection());
     }
 
     for kind in [
@@ -241,12 +195,8 @@ fn scheduled_load_retries_only_transient_foreground_failures() {
         ApiErrorKind::Protocol,
     ] {
         let mut app = App::new(selection(), Duration::from_secs(300));
-        let request = app.begin_foreground_load();
-        app.apply_report(
-            request.generation,
-            Err(error(kind, "permanent failure")),
-            received_at(),
-        );
+        app.begin_foreground_load();
+        app.apply_report(Err(error(kind, "permanent failure")), received_at());
 
         assert!(app.begin_scheduled_load().is_none());
         assert!(matches!(app.report_state(), ReportState::Failed(_)));
@@ -263,7 +213,7 @@ fn partial_and_empty_reports_remain_distinct_ready_states() {
     assert!(partial.report().unwrap().as_of.is_some());
     assert!(!partial.is_empty());
 
-    let request = partial.begin_foreground_load();
+    partial.begin_foreground_load();
     let mut empty = report();
     empty.totals.sessions = 0;
     empty.by_session.clear();
@@ -271,7 +221,7 @@ fn partial_and_empty_reports_remain_distinct_ready_states() {
     empty.by_model.clear();
     empty.by_agent.clear();
     empty.intervals.clear();
-    partial.apply_report(request.generation, Ok(Box::new(empty)), received_at());
+    partial.apply_report(Ok(Box::new(empty)), received_at());
 
     assert!(partial.is_empty());
     assert!(matches!(partial.report_state(), ReportState::Ready { .. }));
@@ -282,15 +232,12 @@ fn metadata_failures_are_independent_from_each_other_and_the_report() {
     // If metadata shares one load state, an agent-list failure can erase a successful report
     // or disable unrelated Project and Machine selectors.
     let mut app = ready_app();
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![ProjectInfo {
+    app.apply_projects(Ok(vec![ProjectInfo {
         name: "project-alpha".to_owned(),
         session_count: 2,
-    }])));
-    app.apply_event(RuntimeEvent::Agents(Err(error(
-        ApiErrorKind::Network,
-        "agents unavailable",
-    ))));
-    app.apply_event(RuntimeEvent::Machines(Ok(vec!["machine-alpha".to_owned()])));
+    }]));
+    app.apply_agents(Err(error(ApiErrorKind::Network, "agents unavailable")));
+    app.apply_machines(Ok(vec!["machine-alpha".to_owned()]));
 
     assert!(matches!(app.projects(), Loadable::Ready(values) if values.len() == 1));
     assert!(matches!(app.agents(), Loadable::Failed(value) if value.kind == ApiErrorKind::Network));
@@ -303,14 +250,11 @@ fn metadata_retry_resets_only_the_failed_selector() {
     // If retrying one selector resets all metadata, a localized failure causes avoidable
     // loading states across the entire filter row.
     let mut app = ready_app();
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![ProjectInfo {
+    app.apply_projects(Ok(vec![ProjectInfo {
         name: "project-alpha".to_owned(),
         session_count: 2,
-    }])));
-    app.apply_event(RuntimeEvent::Agents(Err(error(
-        ApiErrorKind::Network,
-        "agents unavailable",
-    ))));
+    }]));
+    app.apply_agents(Err(error(ApiErrorKind::Network, "agents unavailable")));
 
     let command = app.retry_metadata(MetadataKind::Agents);
 
@@ -324,11 +268,11 @@ fn session_sort_is_stable_and_keeps_untimed_rows_last_in_both_directions() {
     // If null ordering follows direction reversal, untimed rows jump above measured sessions;
     // if ties are unstable, selection moves between refreshes.
     let mut app = ready_app();
-    let request = app.begin_foreground_load();
+    app.begin_foreground_load();
     let mut value = report();
     value.by_session[0].agent_minutes = Some(10.0);
     value.by_session[1].agent_minutes = Some(10.0);
-    app.apply_report(request.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert_eq!(app.sort_column(), SessionSortColumn::AgentMinutes);
     assert_eq!(app.sort_direction(), SortDirection::Descending);
@@ -387,12 +331,8 @@ fn every_session_sort_uses_its_visible_field_and_keeps_partial_windows_last() {
 
     for (column, ascending, descending) in cases {
         let mut app = App::new(selection(), Duration::from_secs(300));
-        let request = app.begin_foreground_load();
-        app.apply_report(
-            request.generation,
-            Ok(Box::new(value.clone())),
-            received_at(),
-        );
+        app.begin_foreground_load();
+        app.apply_report(Ok(Box::new(value.clone())), received_at());
         app.set_focus(Focus::Sessions);
         for _ in 0..7 {
             if app.sort_column() == column {
@@ -430,7 +370,7 @@ fn session_selection_follows_identity_across_sort_and_refresh() {
     assert_eq!(app.sort_direction(), SortDirection::Ascending);
     assert_eq!(selected_session_id(&app), "session-beta");
 
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     let mut value = report();
     value.by_session[1].first_active = value.by_session[0]
         .first_active
@@ -438,7 +378,7 @@ fn session_selection_follows_identity_across_sort_and_refresh() {
     value.by_session[1].last_active = value.by_session[0]
         .last_active
         .map(|timestamp| timestamp - chrono::Duration::hours(1));
-    app.apply_report(refresh.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert_eq!(selected_session_id(&app), "session-beta");
     assert_eq!(app.session_cursor(), 0);
@@ -453,12 +393,12 @@ fn missing_session_selection_clamps_cursor_and_scroll_after_refresh() {
     assert_eq!(selected_session_id(&app), "session-gamma");
     assert_eq!(app.session_scroll(), 2);
 
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     let mut value = report();
     value
         .by_session
         .retain(|row| row.session_id != "session-gamma");
-    app.apply_report(refresh.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert_eq!(app.session_cursor(), 1);
     assert_eq!(app.session_scroll(), 1);
@@ -504,8 +444,8 @@ fn sliced_session_navigation_clamps_and_scrolls_to_the_sliced_rows() {
     }
     value.totals.sessions = value.by_session.len();
     let mut app = App::new(selection(), Duration::from_secs(300));
-    let request = app.begin_foreground_load();
-    app.apply_report(request.generation, Ok(Box::new(value)), received_at());
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value)), received_at());
     app.toggle_timeline_inspection();
 
     app.move_session(20, 2);
@@ -521,8 +461,8 @@ fn moving_a_slice_preserves_session_identity_or_selects_the_first_survivor() {
     let mut shared = report();
     shared.intervals[1].end = shared.buckets[1].end;
     let mut preserving = App::new(selection(), Duration::from_secs(300));
-    let request = preserving.begin_foreground_load();
-    preserving.apply_report(request.generation, Ok(Box::new(shared)), received_at());
+    preserving.begin_foreground_load();
+    preserving.apply_report(Ok(Box::new(shared)), received_at());
     preserving.toggle_timeline_inspection();
     preserving.move_session(1, 2);
     assert_eq!(selected_session_id(&preserving), "session-beta");
@@ -550,13 +490,13 @@ fn refresh_that_removes_the_inspected_bucket_exits_session_slicing() {
     let mut app = ready_app();
     app.toggle_timeline_inspection();
     app.move_timeline(1);
-    let refresh = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     let mut value = report();
     value.buckets.truncate(1);
     value.bucket_count = 1;
     value.elapsed_bucket_count = 1;
 
-    app.apply_report(refresh.generation, Ok(Box::new(value)), received_at());
+    app.apply_report(Ok(Box::new(value)), received_at());
 
     assert!(!app.timeline_inspection_active());
 }
@@ -575,26 +515,4 @@ fn breakdown_category_and_value_mode_select_server_computed_rows() {
 
     assert_eq!(app.breakdown_value(), BreakdownValue::Cost);
     assert_eq!(app.breakdown_rows()[0].key, "codex");
-}
-
-#[test]
-fn runtime_report_event_uses_the_same_generation_gate() {
-    // If runtime events bypass apply_report, a late network task can still replace current
-    // data even though direct state tests pass.
-    let mut app = App::new(selection(), Duration::from_secs(300));
-    let stale = app.begin_foreground_load();
-    let current = app.begin_foreground_load();
-
-    app.apply_event(RuntimeEvent::Report {
-        generation: stale.generation,
-        result: Ok(Box::new(report())),
-        received_at: received_at(),
-    });
-    assert!(app.report().is_none());
-    app.apply_event(RuntimeEvent::Report {
-        generation: current.generation,
-        result: Ok(Box::new(report())),
-        received_at: received_at(),
-    });
-    assert!(app.report().is_some());
 }

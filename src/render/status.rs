@@ -39,7 +39,7 @@ pub(super) fn render_report_notice(
 
 pub(super) fn header_status(app: &App, now: DateTime<Utc>) -> String {
     match app.report_state() {
-        ReportState::InitialLoading { .. } => String::new(),
+        ReportState::InitialLoading => String::new(),
         ReportState::Ready { received_at, .. } => format!("Updated {} ago", age(now, *received_at)),
         ReportState::Refreshing { received_at, .. } => {
             format!("Last update {} ago", age(now, *received_at))
@@ -58,14 +58,14 @@ pub(super) fn header_status(app: &App, now: DateTime<Utc>) -> String {
 pub(super) fn header_spinner(app: &App, now: DateTime<Utc>) -> Option<&'static str> {
     matches!(
         app.report_state(),
-        ReportState::InitialLoading { .. } | ReportState::Refreshing { .. }
+        ReportState::InitialLoading | ReportState::Refreshing { .. }
     )
     .then(|| braille_spinner(now))
 }
 
 pub(super) fn report_notice(app: &App) -> Option<String> {
     match app.report_state() {
-        ReportState::InitialLoading { .. } => None,
+        ReportState::InitialLoading => None,
         ReportState::Failed(error) => Some(match error.kind {
             ApiErrorKind::Authentication if error.message.contains("rejected") => {
                 with_recovery_hint("Credential rejected · replace the runtime token")

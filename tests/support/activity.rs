@@ -25,7 +25,7 @@ pub fn received_at() -> DateTime<Utc> {
 
 pub fn ready_app() -> App {
     let mut app = App::new(selection(), Duration::from_secs(300));
-    let request = app.begin_foreground_load();
-    app.apply_report(request.generation, Ok(Box::new(report())), received_at());
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(report())), received_at());
     app
 }

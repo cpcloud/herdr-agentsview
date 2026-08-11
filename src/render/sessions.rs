@@ -21,6 +21,83 @@ use super::style::{clip_with_ellipsis, pad_right, Palette};
 use super::summary::{format_count, format_usd};
 use super::time::{format_interval, format_window};
 
+struct ColumnSpec {
+    sort: SessionSortColumn,
+    label: &'static str,
+    minimum: usize,
+    flexible: bool,
+    cell: fn(&SessionRow, Tz) -> SessionCell,
+}
+
+const fn column(
+    sort: SessionSortColumn,
+    label: &'static str,
+    minimum: usize,
+    flexible: bool,
+    cell: fn(&SessionRow, Tz) -> SessionCell,
+) -> ColumnSpec {
+    ColumnSpec {
+        sort,
+        label,
+        minimum,
+        flexible,
+        cell,
+    }
+}
+
+const FULL_COLUMNS: [ColumnSpec; 7] = [
+    column(
+        SessionSortColumn::Session,
+        "Session",
+        16,
+        true,
+        session_cell,
+    ),
+    column(SessionSortColumn::Model, "Model", 13, true, model_cell),
+    column(
+        SessionSortColumn::Project,
+        "Project",
+        13,
+        true,
+        project_cell,
+    ),
+    column(SessionSortColumn::Agent, "Agent", 8, true, agent_cell),
+    column(
+        SessionSortColumn::AgentMinutes,
+        "Min",
+        7,
+        false,
+        agent_minutes_cell,
+    ),
+    column(SessionSortColumn::Cost, "Cost", 9, false, cost_cell),
+    column(SessionSortColumn::Window, "Window", 11, true, window_cell),
+];
+
+const COMPACT_COLUMNS: [ColumnSpec; 4] = [
+    column(
+        SessionSortColumn::Session,
+        "Session",
+        18,
+        true,
+        session_cell,
+    ),
+    column(
+        SessionSortColumn::Project,
+        "Project",
+        14,
+        true,
+        project_cell,
+    ),
+    column(
+        SessionSortColumn::AgentMinutes,
+        "Min",
+        7,
+        false,
+        agent_minutes_cell,
+    ),
+    column(SessionSortColumn::Cost, "Cost", 9, false, cost_cell),
+];
+
 pub(super) fn render(
     buffer: &mut Buffer,
     area: Rect,
@@ -55,7 +132,7 @@ pub(super) fn render(
         (Some(report), None) if compact => format!(
             " Sessions ({} total) · Sort: {}{} ",
             report.totals.sessions,
-            sort_name(app.sort_column()),
+            app.sort_column().name(),
             sort_arrow(app.sort_direction())
         ),
         (Some(report), None) => format!(" Sessions ({} total) ", report.totals.sessions),
@@ -75,22 +152,15 @@ pub(super) fn render(
     let timezone = report.timezone;
     let category_colors = CategoryColors::new(&report.by_session);
 
-    let widths = if compact {
-        compact_widths(usize::from(inner.width))
+    let columns = if compact {
+        &COMPACT_COLUMNS[..]
     } else {
-        full_widths(usize::from(inner.width))
+        &FULL_COLUMNS[..]
     };
-    let headers = if compact {
-        vec!["Session", "Project", "Min", "Cost"]
-    } else {
-        vec![
-            "Session", "Model", "Project", "Agent", "Min", "Cost", "Window",
-        ]
-    };
-    let headers = headers
-        .into_iter()
-        .enumerate()
-        .map(|(index, label)| sort_header(app, index, label, compact))
+    let widths = column_widths(usize::from(inner.width), columns);
+    let headers = columns
+        .iter()
+        .map(|column| sort_header(app, column))
         .collect::<Vec<_>>();
     let header = compose_row(" ", &headers, &widths);
     Paragraph::new(Line::from(Span::styled(header, palette.muted())))
@@ -110,11 +180,10 @@ pub(super) fn render(
         } else {
             " "
         };
-        let cells = if compact {
-            compact_cells(row)
-        } else {
-            full_cells(row, timezone)
-        };
+        let cells = columns
+            .iter()
+            .map(|column| (column.cell)(row, timezone))
+            .collect::<Vec<_>>();
         let row_style = if selected && app.focus() == Focus::Sessions {
             palette.session_selected()
         } else {
@@ -154,7 +223,7 @@ fn with_compact_sort(mut title: String, app: &App, compact: bool) -> String {
         title.truncate(title.trim_end().len());
         title.push_str(&format!(
             " · Sort: {}{} ",
-            sort_name(app.sort_column()),
+            app.sort_column().name(),
             sort_arrow(app.sort_direction())
         ));
     }
@@ -207,31 +276,35 @@ fn session_rows(area: Rect, class: LayoutClass) -> SessionRows {
     SessionRows { detail, visible }
 }
 
-fn full_cells(row: &SessionRow, timezone: Tz) -> Vec<SessionCell> {
-    vec![
-        SessionCell::plain(row.title.clone()),
-        SessionCell::category(row.primary_model.clone(), CategoryKind::Model),
-        SessionCell::category(row.project.clone(), CategoryKind::Project),
-        SessionCell::category(row.agent.clone(), CategoryKind::Agent),
-        SessionCell::plain(row.agent_minutes.map_or_else(
-            || "untimed".to_owned(),
-            |value| format_count(value.round() as i128),
-        )),
-        SessionCell::plain(format_usd(row.cost)),
-        SessionCell::plain(window(row, timezone)),
-    ]
+fn session_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::plain(row.title.clone())
 }
 
-fn compact_cells(row: &SessionRow) -> Vec<SessionCell> {
-    vec![
-        SessionCell::plain(row.title.clone()),
-        SessionCell::category(row.project.clone(), CategoryKind::Project),
-        SessionCell::plain(row.agent_minutes.map_or_else(
-            || "untimed".to_owned(),
-            |value| format_count(value.round() as i128),
-        )),
-        SessionCell::plain(format_usd(row.cost)),
-    ]
+fn model_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::category(row.primary_model.clone(), CategoryKind::Model)
+}
+
+fn project_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::category(row.project.clone(), CategoryKind::Project)
+}
+
+fn agent_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::category(row.agent.clone(), CategoryKind::Agent)
+}
+
+fn agent_minutes_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::plain(row.agent_minutes.map_or_else(
+        || "untimed".to_owned(),
+        |value| format_count(value.round() as i128),
+    ))
+}
+
+fn cost_cell(row: &SessionRow, _: Tz) -> SessionCell {
+    SessionCell::plain(format_usd(row.cost))
+}
+
+fn window_cell(row: &SessionRow, timezone: Tz) -> SessionCell {
+    SessionCell::plain(window(row, timezone))
 }
 
 fn window(row: &SessionRow, timezone: Tz) -> String {
@@ -241,42 +314,12 @@ fn window(row: &SessionRow, timezone: Tz) -> String {
     }
 }
 
-fn sort_header(app: &App, index: usize, label: &str, compact: bool) -> String {
-    let column = if compact {
-        [
-            SessionSortColumn::Session,
-            SessionSortColumn::Project,
-            SessionSortColumn::AgentMinutes,
-            SessionSortColumn::Cost,
-        ][index]
-    } else {
-        [
-            SessionSortColumn::Session,
-            SessionSortColumn::Model,
-            SessionSortColumn::Project,
-            SessionSortColumn::Agent,
-            SessionSortColumn::AgentMinutes,
-            SessionSortColumn::Cost,
-            SessionSortColumn::Window,
-        ][index]
-    };
-    if app.sort_column() != column {
-        return label.to_owned();
+fn sort_header(app: &App, column: &ColumnSpec) -> String {
+    if app.sort_column() != column.sort {
+        return column.label.to_owned();
     }
     let arrow = sort_arrow(app.sort_direction());
-    format!("{label}{arrow}")
-}
-
-fn sort_name(column: SessionSortColumn) -> &'static str {
-    match column {
-        SessionSortColumn::Session => "Session",
-        SessionSortColumn::Model => "Model",
-        SessionSortColumn::Project => "Project",
-        SessionSortColumn::Agent => "Agent",
-        SessionSortColumn::AgentMinutes => "Agent-min",
-        SessionSortColumn::Cost => "Cost",
-        SessionSortColumn::Window => "Window",
-    }
+    format!("{}{arrow}", column.label)
 }
 
 fn sort_arrow(direction: SortDirection) -> &'static str {
@@ -388,21 +431,22 @@ fn assign_colors<'a>(
         .collect()
 }
 
-fn full_widths(width: usize) -> Vec<usize> {
-    distribute(width, vec![16, 13, 13, 8, 7, 9, 11], &[0, 1, 2, 3, 6])
-}
-
-fn compact_widths(width: usize) -> Vec<usize> {
-    distribute(width, vec![18, 14, 7, 9], &[0, 1])
-}
-
-fn distribute(width: usize, mut widths: Vec<usize>, flexible: &[usize]) -> Vec<usize> {
+fn column_widths(width: usize, columns: &[ColumnSpec]) -> Vec<usize> {
+    let mut widths = columns
+        .iter()
+        .map(|column| column.minimum)
+        .collect::<Vec<_>>();
     let fixed = 2 + widths.len().saturating_sub(1) + widths.iter().sum::<usize>();
     let mut remaining = width.saturating_sub(fixed);
-    let mut index = 0;
+    let flexible = columns
+        .iter()
+        .enumerate()
+        .filter_map(|(index, column)| column.flexible.then_some(index))
+        .collect::<Vec<_>>();
+    let mut cursor = 0;
     while remaining > 0 {
-        widths[flexible[index % flexible.len()]] += 1;
-        index += 1;
+        widths[flexible[cursor % flexible.len()]] += 1;
+        cursor += 1;
         remaining -= 1;
     }
     widths
@@ -610,9 +654,8 @@ mod tests {
         let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
         let mut app = App::new(selection, Duration::from_secs(300));
         app.set_color_mode(ColorMode::Color);
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );

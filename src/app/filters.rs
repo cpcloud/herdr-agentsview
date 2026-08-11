@@ -43,19 +43,38 @@ enum FilterChoice {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct FilterItem {
+    label: String,
+    choice: FilterChoice,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FilterPopup {
-    pub labels: Vec<String>,
     pub selected: usize,
     pub query: String,
     focus: Focus,
-    choices: Vec<FilterChoice>,
-    source: Vec<(String, FilterChoice)>,
+    items: Vec<FilterItem>,
+    visible: Vec<usize>,
     initial_selected: usize,
 }
 
 impl FilterPopup {
     pub fn is_searchable(&self) -> bool {
         self.focus == Focus::Project
+    }
+
+    pub fn labels(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.visible
+            .iter()
+            .map(|index| self.items[*index].label.as_str())
+    }
+
+    pub fn len(&self) -> usize {
+        self.visible.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.visible.is_empty()
     }
 }
 
@@ -142,7 +161,7 @@ impl App {
     }
 
     pub(crate) fn open_filter_popup(&mut self) -> bool {
-        let (labels, choices, selected) = match self.focus {
+        let (items, selected) = match self.focus {
             Focus::Project => {
                 let Loadable::Ready(projects) = &self.projects else {
                     return false;
@@ -180,30 +199,23 @@ impl App {
                     .iter()
                     .position(|(_, value)| *value == self.selection.automation)
                     .expect("closed automation value");
-                (
-                    values
-                        .iter()
-                        .map(|(label, _)| (*label).to_owned())
-                        .collect(),
-                    values
-                        .iter()
-                        .map(|(_, value)| FilterChoice::Automation(*value))
-                        .collect(),
-                    selected,
-                )
+                let items = values
+                    .iter()
+                    .map(|(label, value)| FilterItem {
+                        label: (*label).to_owned(),
+                        choice: FilterChoice::Automation(*value),
+                    })
+                    .collect();
+                (items, selected)
             }
             Focus::Date | Focus::Timeline | Focus::Sessions | Focus::Breakdowns => return false,
         };
+        let visible = (0..items.len()).collect();
         self.popup = Some(FilterPopup {
-            source: labels
-                .iter()
-                .cloned()
-                .zip(choices.iter().cloned())
-                .collect(),
-            labels,
             selected,
             focus: self.focus,
-            choices,
+            items,
+            visible,
             query: String::new(),
             initial_selected: selected,
         });
@@ -217,7 +229,7 @@ impl App {
         popup.selected = popup
             .selected
             .saturating_add_signed(delta)
-            .min(popup.choices.len().saturating_sub(1));
+            .min(popup.len().saturating_sub(1));
     }
 
     pub(crate) fn close_popup(&mut self) {
@@ -244,7 +256,12 @@ impl App {
         let Some(popup) = self.popup.as_ref() else {
             return false;
         };
-        let Some(choice) = popup.choices.get(popup.selected).cloned() else {
+        let Some(choice) = popup
+            .visible
+            .get(popup.selected)
+            .and_then(|index| popup.items.get(*index))
+            .map(|item| item.choice.clone())
+        else {
             return false;
         };
         let focus = popup.focus;
@@ -303,39 +320,24 @@ pub(crate) enum PopupQueryEdit {
 
 fn refresh_project_results(popup: &mut FilterPopup) {
     if popup.query.is_empty() {
-        popup.labels = popup
-            .source
-            .iter()
-            .map(|(label, _)| label.clone())
-            .collect();
-        popup.choices = popup
-            .source
-            .iter()
-            .map(|(_, choice)| choice.clone())
-            .collect();
+        popup.visible = (0..popup.items.len()).collect();
         popup.selected = popup.initial_selected;
         return;
     }
 
     let mut matches = popup
-        .source
+        .items
         .iter()
         .enumerate()
-        .filter_map(|(index, (label, choice))| match choice {
-            FilterChoice::Text(_) => fuzzy_score(label, &popup.query)
-                .map(|score| (score, index, label.clone(), choice.clone())),
+        .filter_map(|(index, item)| match &item.choice {
+            FilterChoice::Text(_) => {
+                fuzzy_score(&item.label, &popup.query).map(|score| (score, index))
+            }
             FilterChoice::All | FilterChoice::Automation(_) => None,
         })
         .collect::<Vec<_>>();
     matches.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-    popup.labels = matches
-        .iter()
-        .map(|(_, _, label, _)| label.clone())
-        .collect();
-    popup.choices = matches
-        .into_iter()
-        .map(|(_, _, _, choice)| choice)
-        .collect();
+    popup.visible = matches.into_iter().map(|(_, index)| index).collect();
     popup.selected = 0;
 }
 
@@ -366,21 +368,25 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
 fn text_popup<'a>(
     values: impl Iterator<Item = &'a str>,
     current: Option<&str>,
-) -> (Vec<String>, Vec<FilterChoice>, usize) {
-    let mut labels = vec!["All".to_owned()];
-    let mut choices = vec![FilterChoice::All];
+) -> (Vec<FilterItem>, usize) {
+    let mut items = vec![FilterItem {
+        label: "All".to_owned(),
+        choice: FilterChoice::All,
+    }];
     for value in values {
-        labels.push(value.to_owned());
-        choices.push(FilterChoice::Text(value.to_owned()));
+        items.push(FilterItem {
+            label: value.to_owned(),
+            choice: FilterChoice::Text(value.to_owned()),
+        });
     }
     let selected = current
         .and_then(|current| {
-            choices
-                .iter()
-                .position(|choice| matches!(choice, FilterChoice::Text(value) if value == current))
+            items.iter().position(
+                |item| matches!(&item.choice, FilterChoice::Text(value) if value == current),
+            )
         })
         .unwrap_or(0);
-    (labels, choices, selected)
+    (items, selected)
 }
 
 fn replace_if_changed<T: PartialEq>(target: &mut T, value: T) -> bool {

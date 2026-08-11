@@ -20,6 +20,30 @@ pub enum SessionSortColumn {
     Window,
 }
 
+impl SessionSortColumn {
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Session,
+        Self::Model,
+        Self::Project,
+        Self::Agent,
+        Self::AgentMinutes,
+        Self::Cost,
+        Self::Window,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Session => "Session",
+            Self::Model => "Model",
+            Self::Project => "Project",
+            Self::Agent => "Agent",
+            Self::AgentMinutes => "Agent-min",
+            Self::Cost => "Cost",
+            Self::Window => "Window",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SortDirection {
     Ascending,
@@ -178,22 +202,14 @@ impl App {
     }
 
     pub(crate) fn move_sort_column(&mut self, delta: isize) {
-        const COLUMNS: [SessionSortColumn; 7] = [
-            SessionSortColumn::Session,
-            SessionSortColumn::Model,
-            SessionSortColumn::Project,
-            SessionSortColumn::Agent,
-            SessionSortColumn::AgentMinutes,
-            SessionSortColumn::Cost,
-            SessionSortColumn::Window,
-        ];
         let selected_session_id = self.selected_session_id();
-        let current = COLUMNS
+        let current = SessionSortColumn::ALL
             .iter()
             .position(|column| *column == self.sessions.column)
             .expect("closed session sort column");
-        let next = (current as isize + delta).rem_euclid(COLUMNS.len() as isize) as usize;
-        self.sessions.column = COLUMNS[next];
+        let next =
+            (current as isize + delta).rem_euclid(SessionSortColumn::ALL.len() as isize) as usize;
+        self.sessions.column = SessionSortColumn::ALL[next];
         self.restore_session_selection(selected_session_id.as_deref());
     }
 

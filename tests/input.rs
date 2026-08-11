@@ -8,9 +8,9 @@ use chrono::{NaiveDate, Utc};
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
 use herdr_agentsview::app::{
     App, AppCommand, BreakdownCategory, BreakdownValue, CompactRegion, Focus, InputKey, Loadable,
-    MetadataKind, RequestKind, RuntimeEvent, SessionSortColumn, SortDirection,
+    MetadataKind, SessionSortColumn, SortDirection,
 };
-use herdr_agentsview::wire::{Automation, ProjectInfo};
+use herdr_agentsview::wire::{Automation, ProjectInfo, ReportSelection};
 
 #[path = "support/activity.rs"]
 mod activity_support;
@@ -21,9 +21,9 @@ fn today() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 8, 9).unwrap()
 }
 
-fn report_request(commands: &[AppCommand]) -> &herdr_agentsview::app::ReportRequest {
-    match commands {
-        [AppCommand::FetchReport(request)] => request,
+fn report_selection(command: &Option<AppCommand>) -> &ReportSelection {
+    match command {
+        Some(AppCommand::FetchReport(selection)) => selection,
         other => panic!("expected one report request, got {other:?}"),
     }
 }
@@ -80,19 +80,22 @@ fn date_keys_move_calendar_days_and_backspace_restores_today() {
     // selections and the visible filter can drift.
     let mut app = App::new(selection(), Duration::from_secs(300));
 
-    let commands = app.handle_input(InputKey::Left, today());
+    let command = app.handle_input(InputKey::Left, today());
     assert_eq!(
         app.selection().date,
         NaiveDate::from_ymd_opt(2026, 8, 7).unwrap()
     );
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(
+        report_selection(&command).date,
+        NaiveDate::from_ymd_opt(2026, 8, 7).unwrap()
+    );
 
-    let commands = app.handle_input(InputKey::Backspace, today());
+    let command = app.handle_input(InputKey::Backspace, today());
     assert_eq!(app.selection().date, today());
-    assert_eq!(report_request(&commands).selection.date, today());
+    assert_eq!(report_selection(&command).date, today());
 
-    let commands = app.handle_input(InputKey::Right, today());
-    assert!(commands.is_empty());
+    let command = app.handle_input(InputKey::Right, today());
+    assert!(command.is_none());
     assert_eq!(app.selection().date, today());
 }
 
@@ -101,18 +104,21 @@ fn project_popup_accepts_metadata_and_escape_cancels() {
     // If popup acceptance reads display text rather than typed metadata, All and a real
     // similarly named project can be confused or Esc can still mutate the filter.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![ProjectInfo {
+    app.apply_projects(Ok(vec![ProjectInfo {
         name: "project-alpha".to_owned(),
         session_count: 2,
-    }])));
+    }]));
     app.set_focus(Focus::Project);
 
-    assert!(app.handle_input(InputKey::Enter, today()).is_empty());
-    assert_eq!(app.popup().unwrap().labels, ["All", "project-alpha"]);
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
+    assert_eq!(
+        app.popup().unwrap().labels().collect::<Vec<_>>(),
+        ["All", "project-alpha"]
+    );
     app.handle_input(InputKey::Down, today());
-    let commands = app.handle_input(InputKey::Enter, today());
+    let command = app.handle_input(InputKey::Enter, today());
     assert_eq!(app.selection().project.as_deref(), Some("project-alpha"));
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 
     app.handle_input(InputKey::Enter, today());
     app.handle_input(InputKey::Up, today());
@@ -126,7 +132,7 @@ fn project_popup_fuzzy_filters_while_preserving_text_input() {
     // If the Project picker only supports row navigation, large project lists remain slow;
     // if `q` is still treated as global quit while searching, valid queries close the app.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![
+    app.apply_projects(Ok(vec![
         ProjectInfo {
             name: "agentsview-herdr-dashboard".to_owned(),
             session_count: 3,
@@ -139,29 +145,32 @@ fn project_popup_fuzzy_filters_while_preserving_text_input() {
             name: "unrelated".to_owned(),
             session_count: 1,
         },
-    ])));
+    ]));
     app.set_focus(Focus::Project);
     app.handle_input(InputKey::Enter, today());
 
     for key in ['a', 'v', 'd'] {
-        assert!(app.handle_input(InputKey::Char(key), today()).is_empty());
+        assert!(app.handle_input(InputKey::Char(key), today()).is_none());
     }
     let popup = app.popup().unwrap();
     assert_eq!(popup.query, "avd");
-    assert_eq!(popup.labels, ["agentsview-herdr-dashboard"]);
+    assert_eq!(
+        popup.labels().collect::<Vec<_>>(),
+        ["agentsview-herdr-dashboard"]
+    );
 
     app.handle_input(InputKey::Backspace, today());
     assert_eq!(app.popup().unwrap().query, "av");
     app.handle_input(InputKey::Char('q'), today());
     assert_eq!(app.popup().unwrap().query, "avq");
-    assert!(app.handle_input(InputKey::Backspace, today()).is_empty());
+    assert!(app.handle_input(InputKey::Backspace, today()).is_none());
 
-    let commands = app.handle_input(InputKey::Enter, today());
+    let command = app.handle_input(InputKey::Enter, today());
     assert_eq!(
         app.selection().project.as_deref(),
         Some("agentsview-herdr-dashboard")
     );
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 }
 
 #[test]
@@ -169,7 +178,7 @@ fn clearing_a_project_query_restores_the_applied_project() {
     // If erasing a fuzzy query resets the highlight to All, pressing Enter clears an
     // existing project filter and launches a broader report unexpectedly.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![
+    app.apply_projects(Ok(vec![
         ProjectInfo {
             name: "agentsview-herdr-dashboard".to_owned(),
             session_count: 3,
@@ -178,7 +187,7 @@ fn clearing_a_project_query_restores_the_applied_project() {
             name: "herdr-core".to_owned(),
             session_count: 2,
         },
-    ])));
+    ]));
     app.set_project(Some("herdr-core".to_owned()));
     app.set_focus(Focus::Project);
     app.handle_input(InputKey::Enter, today());
@@ -187,7 +196,7 @@ fn clearing_a_project_query_restores_the_applied_project() {
     app.handle_input(InputKey::Backspace, today());
 
     assert_eq!(app.popup().unwrap().selected, 2);
-    assert!(app.handle_input(InputKey::Enter, today()).is_empty());
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
     assert_eq!(app.selection().project.as_deref(), Some("herdr-core"));
 }
 
@@ -196,7 +205,7 @@ fn project_search_ranks_the_stronger_match_and_keeps_no_match_open() {
     // If fuzzy results are ordered backwards, Enter applies a weaker project match; if an
     // empty result closes on Enter, the operator loses the query without making a choice.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![
+    app.apply_projects(Ok(vec![
         ProjectInfo {
             name: "agentsview-herdr-dashboard".to_owned(),
             session_count: 3,
@@ -205,22 +214,22 @@ fn project_search_ranks_the_stronger_match_and_keeps_no_match_open() {
             name: "herdr-core".to_owned(),
             session_count: 2,
         },
-    ])));
+    ]));
     app.set_focus(Focus::Project);
     app.handle_input(InputKey::Enter, today());
     for key in "herdr".chars() {
         app.handle_input(InputKey::Char(key), today());
     }
 
-    assert_eq!(app.popup().unwrap().labels[0], "herdr-core");
+    assert_eq!(app.popup().unwrap().labels().next(), Some("herdr-core"));
     app.handle_input(InputKey::Escape, today());
     app.handle_input(InputKey::Enter, today());
     for key in "zzz".chars() {
         app.handle_input(InputKey::Char(key), today());
     }
 
-    assert!(app.popup().unwrap().labels.is_empty());
-    assert!(app.handle_input(InputKey::Enter, today()).is_empty());
+    assert!(app.popup().unwrap().is_empty());
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
     assert!(app.popup().is_some());
     assert!(app.selection().project.is_none());
 }
@@ -240,11 +249,11 @@ fn popup_hints_expose_the_still_active_global_quit_key() {
         .any(|hint| hint.key == "q" && hint.action == "close dashboard"));
     assert_eq!(
         app.handle_input(InputKey::Char('q'), today()),
-        [AppCommand::Quit]
+        Some(AppCommand::Quit)
     );
     assert_eq!(
         app.handle_input(InputKey::Quit, today()),
-        [AppCommand::Quit]
+        Some(AppCommand::Quit)
     );
 }
 
@@ -253,25 +262,28 @@ fn project_named_all_remains_distinct_from_the_reset_choice() {
     // If popup selection is recovered from display labels, a real project named All
     // resolves to the synthetic reset row and Enter unexpectedly broadens the report.
     let mut app = App::new(selection(), Duration::from_secs(300));
-    app.apply_event(RuntimeEvent::Projects(Ok(vec![ProjectInfo {
+    app.apply_projects(Ok(vec![ProjectInfo {
         name: "All".to_owned(),
         session_count: 1,
-    }])));
+    }]));
     app.set_project(Some("All".to_owned()));
     app.set_focus(Focus::Project);
 
     app.handle_input(InputKey::Enter, today());
 
-    assert_eq!(app.popup().unwrap().labels, ["All", "All"]);
+    assert_eq!(
+        app.popup().unwrap().labels().collect::<Vec<_>>(),
+        ["All", "All"]
+    );
     assert_eq!(app.popup().unwrap().selected, 1);
-    assert!(app.handle_input(InputKey::Enter, today()).is_empty());
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
     assert_eq!(app.selection().project.as_deref(), Some("All"));
 
     app.handle_input(InputKey::Enter, today());
     app.handle_input(InputKey::Up, today());
-    let commands = app.handle_input(InputKey::Enter, today());
+    let command = app.handle_input(InputKey::Enter, today());
     assert!(app.selection().project.is_none());
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 }
 
 #[test]
@@ -283,11 +295,11 @@ fn backspace_clears_only_the_focused_filter() {
     app.set_agent(Some("codex".to_owned()));
     app.set_focus(Focus::Project);
 
-    let commands = app.handle_input(InputKey::Backspace, today());
+    let command = app.handle_input(InputKey::Backspace, today());
 
     assert!(app.selection().project.is_none());
     assert_eq!(app.selection().agent.as_deref(), Some("codex"));
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 }
 
 #[test]
@@ -299,14 +311,14 @@ fn automation_popup_uses_only_the_three_supported_categories() {
 
     app.handle_input(InputKey::Enter, today());
     assert_eq!(
-        app.popup().unwrap().labels,
+        app.popup().unwrap().labels().collect::<Vec<_>>(),
         ["All", "Interactive", "Automated"]
     );
     app.handle_input(InputKey::Down, today());
-    let commands = app.handle_input(InputKey::Enter, today());
+    let command = app.handle_input(InputKey::Enter, today());
 
     assert_eq!(app.selection().automation, Automation::Interactive);
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 }
 
 #[test]
@@ -314,10 +326,10 @@ fn failed_metadata_retries_contextually_without_refreshing_the_report() {
     // If contextual retry emits a report request, a local selector failure causes needless
     // report traffic while leaving the failed metadata untouched.
     let mut app = ready_app();
-    app.apply_event(RuntimeEvent::Projects(Err(ApiError {
+    app.apply_projects(Err(ApiError {
         kind: ApiErrorKind::Network,
         message: "projects unavailable".to_owned(),
-    })));
+    }));
     app.set_focus(Focus::Project);
 
     let hints = app.contextual_keys();
@@ -326,11 +338,11 @@ fn failed_metadata_retries_contextually_without_refreshing_the_report() {
         .any(|hint| hint.key == "r" && hint.action == "retry"));
     assert!(!hints.iter().any(|hint| hint.key == "Enter"));
 
-    let commands = app.handle_input(InputKey::Char('r'), today());
+    let command = app.handle_input(InputKey::Char('r'), today());
 
     assert_eq!(
-        commands,
-        [AppCommand::FetchMetadata(MetadataKind::Projects)]
+        command,
+        Some(AppCommand::FetchMetadata(MetadataKind::Projects))
     );
     assert!(matches!(app.projects(), Loadable::Loading));
 }
@@ -357,7 +369,7 @@ fn in_flight_report_does_not_advertise_an_inert_refresh() {
     let hints = app.contextual_keys();
 
     assert!(!hints.iter().any(|hint| hint.key == "r"));
-    assert!(app.handle_input(InputKey::Char('r'), today()).is_empty());
+    assert!(app.handle_input(InputKey::Char('r'), today()).is_none());
 }
 
 #[test]
@@ -379,9 +391,8 @@ fn stale_report_advertises_retry_consistently() {
     // If the stale header and footer name different actions for the same key, recovery copy is
     // internally contradictory even though both paths issue the same request.
     let mut app = ready_app();
-    let request = app.begin_refresh().unwrap();
+    app.begin_refresh().unwrap();
     app.apply_report(
-        request.generation,
         Err(ApiError {
             kind: ApiErrorKind::Network,
             message: "offline".to_owned(),
@@ -483,8 +494,8 @@ fn refresh_help_and_quit_emit_contextual_behavior() {
     let mut app = ready_app();
 
     let refresh = app.handle_input(InputKey::Char('r'), today());
-    assert_eq!(report_request(&refresh).kind, RequestKind::Refresh);
-    assert!(app.handle_input(InputKey::Char('r'), today()).is_empty());
+    assert_eq!(report_selection(&refresh), app.selection());
+    assert!(app.handle_input(InputKey::Char('r'), today()).is_none());
 
     app.handle_input(InputKey::Char('?'), today());
     assert!(app.help_open());
@@ -494,7 +505,7 @@ fn refresh_help_and_quit_emit_contextual_behavior() {
 
     assert_eq!(
         app.handle_input(InputKey::Char('q'), today()),
-        [AppCommand::Quit]
+        Some(AppCommand::Quit)
     );
 }
 
@@ -503,8 +514,16 @@ fn retry_without_a_report_starts_a_foreground_load() {
     // If manual retry requires last-good data, initial network failures become terminal
     // until the pane is restarted.
     let mut app = App::new(selection(), Duration::from_secs(300));
+    app.begin_foreground_load();
+    app.apply_report(
+        Err(ApiError {
+            kind: ApiErrorKind::Network,
+            message: "offline".to_owned(),
+        }),
+        Utc::now(),
+    );
 
-    let commands = app.handle_input(InputKey::Char('r'), today());
+    let command = app.handle_input(InputKey::Char('r'), today());
 
-    assert_eq!(report_request(&commands).kind, RequestKind::Foreground);
+    assert_eq!(report_selection(&command), app.selection());
 }

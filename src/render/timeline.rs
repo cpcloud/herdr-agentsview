@@ -436,9 +436,8 @@ mod tests {
         let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
         let mut app = App::new(selection, Duration::from_secs(300));
         app.set_color_mode(ColorMode::Color);
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
@@ -466,9 +465,8 @@ mod tests {
         let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
         let mut app = App::new(selection, Duration::from_secs(300));
         app.set_color_mode(ColorMode::Color);
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
@@ -496,9 +494,8 @@ mod tests {
         let expected_start = super::format_clock(report.range_start, report.timezone);
         let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
         let mut app = App::new(selection, Duration::from_secs(300));
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
@@ -526,9 +523,8 @@ mod tests {
         report.buckets[1].interactive_at_peak = 3;
         let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
         let mut app = App::new(selection, Duration::from_secs(300));
-        let request = app.begin_foreground_load();
+        app.begin_foreground_load();
         app.apply_report(
-            request.generation,
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
         );
