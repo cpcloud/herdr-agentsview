@@ -7,16 +7,5 @@
   "extends": ["config:recommended"],
   "nix": {
     "enabled": true
-  },
-  "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/renovate\\.yml$/"],
-      "matchStrings": [
-        "renovate-version: (?<currentValue>\\d+\\.\\d+\\.\\d+)"
-      ],
-      "depNameTemplate": "renovatebot/renovate",
-      "datasourceTemplate": "github-releases"
-    }
-  ]
+  }
 }
