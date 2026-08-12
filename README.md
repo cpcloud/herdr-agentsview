@@ -10,7 +10,8 @@ SPDX-License-Identifier: Apache-2.0
 <!-- markdownlint-disable-next-line MD033 -->
 <img src="assets/icon.png" width="96" alt="Terminal chevron and activity bars">
 
-AgentsView activity, compressed into one very busy terminal.
+[AgentsView](https://github.com/kenn-io/agentsview) activity, compressed into one
+very busy terminal.
 
 ![Synthetic AgentsView Activity dashboard](assets/dashboard.png)
 
