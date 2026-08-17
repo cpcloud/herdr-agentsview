@@ -92,7 +92,7 @@ pub fn empty_app(color_mode: ColorMode) -> App {
     value.by_model.clear();
     value.by_agent.clear();
     value.by_session.clear();
-    value.intervals.clear();
+    value.sessions_total = 0;
     for bucket in &mut value.buckets {
         bucket.max_agents = 0;
         bucket.agent_minutes = 0.0;

@@ -2,12 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use anyhow::Context;
 use reqwest::redirect::Policy;
 use reqwest::{Client, Response, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::error::Category;
 use serde_path_to_error::{Path, Segment};
@@ -17,12 +19,20 @@ use url::Url;
 use crate::config::{validate_base_url, PluginConfig};
 use crate::wire::{
     AgentInfo, AgentsResponse, MachinesResponse, ProjectInfo, ProjectsResponse, Report,
-    ReportSelection, ACTIVITY_SCHEMA_VERSION,
+    ReportSelection, SessionPage, SessionRow, ACTIVITY_SCHEMA_VERSION,
 };
 
 const ERROR_EXCERPT_CHARS: usize = 160;
 const MAX_ERROR_BODY_BYTES: usize = 8 * 1024;
 const MAX_SUCCESS_BODY_BYTES: usize = 16 * 1024 * 1024;
+const SESSION_PAGE_LIMIT: usize = 500;
+const MAX_REPORT_GENERATION_RESTARTS: usize = 1;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionFetch {
+    Rows(Vec<SessionRow>),
+    Refreshed(Box<Report>),
+}
 
 #[derive(Clone)]
 pub struct ActivityClient {
@@ -65,33 +75,52 @@ impl ActivityClient {
         let body = self
             .get("api/v1/activity/report", &selection.query_pairs())
             .await?;
-        let version: VersionEnvelope = serde_json::from_slice(&body).map_err(|error| {
-            if matches!(error.classify(), Category::Syntax | Category::Eof) {
-                ApiError::protocol("AgentsView returned invalid JSON for Activity")
-            } else {
-                ApiError::protocol(
-                    "AgentsView Activity response has an incompatible schema_version type",
-                )
-            }
-        })?;
-        let version = version.schema_version.ok_or_else(|| {
-            ApiError::protocol("AgentsView Activity response is missing schema_version")
-        })?;
-        if version != ACTIVITY_SCHEMA_VERSION {
-            return Err(ApiError::protocol(format!(
-                "unsupported Activity schema version {version}; expected {ACTIVITY_SCHEMA_VERSION}"
-            )));
+        self.hydrate_report(decode_report(&body)?).await
+    }
+
+    pub async fn fetch_bucket_sessions(
+        &self,
+        report_id: &str,
+        bucket: usize,
+    ) -> Result<SessionFetch, ApiError> {
+        let first = self
+            .fetch_session_page(report_id, None, Some(bucket))
+            .await?;
+        if first.refresh_required {
+            return self.hydrate_replacement(first).await;
         }
-        let mut deserializer = serde_json::Deserializer::from_slice(&body);
-        serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
-            let path = safe_contract_path(error.path());
-            let message = "AgentsView response does not match the schema v5 contract";
-            if path.is_empty() {
-                ApiError::protocol(message)
-            } else {
-                ApiError::protocol(format!("{message} at {path}"))
+        validate_page_report_id(&first, report_id)?;
+        let total = first.total;
+        let mut rows = first.sessions;
+        let mut cursor = first.next_cursor;
+        validate_cursor_progress(rows.len(), cursor.as_deref())?;
+        validate_cursor_at_total(rows.len(), total, cursor.as_deref())?;
+        let mut seen_cursors = BTreeSet::new();
+        while let Some(current) = cursor {
+            if !seen_cursors.insert(current.clone()) {
+                return Err(ApiError::protocol(
+                    "AgentsView repeated an Activity session cursor",
+                ));
             }
-        })
+            let page = self
+                .fetch_session_page(report_id, Some(&current), None)
+                .await?;
+            if page.refresh_required {
+                return self.hydrate_replacement(page).await;
+            }
+            validate_page_report_id(&page, report_id)?;
+            if page.total != total {
+                return Err(ApiError::protocol(
+                    "AgentsView changed the Activity bucket total while paging",
+                ));
+            }
+            validate_cursor_progress(page.sessions.len(), page.next_cursor.as_deref())?;
+            append_session_page(&mut rows, page.sessions, total)?;
+            validate_cursor_at_total(rows.len(), total, page.next_cursor.as_deref())?;
+            cursor = page.next_cursor;
+        }
+        validate_session_rows(&rows, total)?;
+        Ok(SessionFetch::Rows(rows))
     }
 
     pub async fn fetch_projects(&self) -> Result<Vec<ProjectInfo>, ApiError> {
@@ -116,10 +145,136 @@ impl ActivityClient {
     }
 
     async fn get(&self, path: &str, query: &[(&'static str, String)]) -> Result<Vec<u8>, ApiError> {
-        let mut endpoint = self
+        let endpoint = self
             .base_url
             .join(path)
             .map_err(|_| ApiError::protocol("invalid AgentsView endpoint configuration"))?;
+        self.get_endpoint(endpoint, query).await
+    }
+
+    async fn fetch_session_page(
+        &self,
+        report_id: &str,
+        cursor: Option<&str>,
+        bucket: Option<usize>,
+    ) -> Result<SessionPage, ApiError> {
+        if report_id.is_empty() {
+            return Err(ApiError::protocol(
+                "AgentsView Activity report is missing a usable report_id",
+            ));
+        }
+        let mut endpoint = self
+            .base_url
+            .join("api/v1/activity/report/")
+            .map_err(|_| ApiError::protocol("invalid AgentsView endpoint configuration"))?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| ApiError::protocol("invalid AgentsView endpoint configuration"))?
+            .pop_if_empty()
+            .push(report_id)
+            .push("sessions");
+        let mut query = vec![("limit", SESSION_PAGE_LIMIT.to_string())];
+        if let Some(cursor) = cursor {
+            query.push(("cursor", cursor.to_owned()));
+        } else if let Some(bucket) = bucket {
+            query.push(("sort", "agent_minutes".to_owned()));
+            query.push(("direction", "desc".to_owned()));
+            query.push(("bucket", bucket.to_string()));
+        }
+        let body = self.get_endpoint(endpoint, &query).await?;
+        decode_contract(&body, "schema v6 Activity session-page")
+    }
+
+    async fn hydrate_report(&self, mut report: Report) -> Result<Report, ApiError> {
+        validate_report_contract(&report)?;
+        for restart in 0..=MAX_REPORT_GENERATION_RESTARTS {
+            match self.hydrate_report_generation(report).await? {
+                Hydration::Complete(value) => return Ok(value),
+                Hydration::Refreshed(value) if restart < MAX_REPORT_GENERATION_RESTARTS => {
+                    report = value;
+                }
+                Hydration::Refreshed(_) => {
+                    return Err(ApiError::new(
+                        ApiErrorKind::Server,
+                        "AgentsView Activity data changed repeatedly while paging; retry",
+                    ));
+                }
+            }
+        }
+        unreachable!("bounded Activity report hydration loop")
+    }
+
+    async fn hydrate_report_generation(&self, mut report: Report) -> Result<Hydration, ApiError> {
+        validate_report_contract(&report)?;
+        if report.by_session.len() > report.sessions_total {
+            return Err(ApiError::protocol(
+                "AgentsView Activity report contains more sessions than sessions_total",
+            ));
+        }
+        let Some(mut cursor) = report.sessions_next_cursor.take() else {
+            validate_session_rows(&report.by_session, report.sessions_total)?;
+            return Ok(Hydration::Complete(report));
+        };
+        validate_cursor_progress(report.by_session.len(), Some(&cursor))?;
+        validate_cursor_at_total(
+            report.by_session.len(),
+            report.sessions_total,
+            Some(&cursor),
+        )?;
+        let report_id = report.report_id.clone().ok_or_else(|| {
+            ApiError::protocol("AgentsView paged Activity report is missing report_id")
+        })?;
+        let mut seen_cursors = BTreeSet::new();
+        loop {
+            if !seen_cursors.insert(cursor.clone()) {
+                return Err(ApiError::protocol(
+                    "AgentsView repeated an Activity session cursor",
+                ));
+            }
+            let page = self
+                .fetch_session_page(&report_id, Some(&cursor), None)
+                .await?;
+            if page.refresh_required {
+                let replacement = replacement_report(page)?;
+                validate_report_contract(&replacement)?;
+                return Ok(Hydration::Refreshed(replacement));
+            }
+            validate_page_report_id(&page, &report_id)?;
+            if page.total != report.sessions_total {
+                return Err(ApiError::protocol(
+                    "AgentsView changed sessions_total while paging Activity",
+                ));
+            }
+            validate_cursor_progress(page.sessions.len(), page.next_cursor.as_deref())?;
+            append_session_page(&mut report.by_session, page.sessions, report.sessions_total)?;
+            validate_cursor_at_total(
+                report.by_session.len(),
+                report.sessions_total,
+                page.next_cursor.as_deref(),
+            )?;
+            match page.next_cursor {
+                Some(next) => cursor = next,
+                None => break,
+            }
+        }
+        validate_session_rows(&report.by_session, report.sessions_total)?;
+        Ok(Hydration::Complete(report))
+    }
+
+    async fn hydrate_replacement(&self, page: SessionPage) -> Result<SessionFetch, ApiError> {
+        let replacement = replacement_report(page)?;
+        validate_report_contract(&replacement)?;
+        self.hydrate_report(replacement)
+            .await
+            .map(Box::new)
+            .map(SessionFetch::Refreshed)
+    }
+
+    async fn get_endpoint(
+        &self,
+        mut endpoint: Url,
+        query: &[(&str, String)],
+    ) -> Result<Vec<u8>, ApiError> {
         {
             let mut pairs = endpoint.query_pairs_mut();
             for (key, value) in query {
@@ -168,6 +323,142 @@ impl ActivityClient {
             return Err(ApiError::from_status(status, &body.bytes, authenticated));
         }
         Ok(body.bytes)
+    }
+}
+
+enum Hydration {
+    Complete(Report),
+    Refreshed(Report),
+}
+
+fn decode_report(body: &[u8]) -> Result<Report, ApiError> {
+    let version: VersionEnvelope = serde_json::from_slice(body).map_err(|error| {
+        if matches!(error.classify(), Category::Syntax | Category::Eof) {
+            ApiError::protocol("AgentsView returned invalid JSON for Activity")
+        } else {
+            ApiError::protocol(
+                "AgentsView Activity response has an incompatible schema_version type",
+            )
+        }
+    })?;
+    let version = version.schema_version.ok_or_else(|| {
+        ApiError::protocol("AgentsView Activity response is missing schema_version")
+    })?;
+    if version != ACTIVITY_SCHEMA_VERSION {
+        return Err(ApiError::protocol(format!(
+            "unsupported Activity schema version {version}; expected {ACTIVITY_SCHEMA_VERSION}"
+        )));
+    }
+    decode_contract(body, "schema v6")
+}
+
+fn decode_contract<T: DeserializeOwned>(body: &[u8], contract: &str) -> Result<T, ApiError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+        let path = safe_contract_path(error.path());
+        let message = format!("AgentsView response does not match the {contract} contract");
+        if path.is_empty() {
+            ApiError::protocol(message)
+        } else {
+            ApiError::protocol(format!("{message} at {path}"))
+        }
+    })
+}
+
+fn validate_report_contract(report: &Report) -> Result<(), ApiError> {
+    if report.schema_version != ACTIVITY_SCHEMA_VERSION {
+        return Err(ApiError::protocol(format!(
+            "unsupported Activity schema version {}; expected {ACTIVITY_SCHEMA_VERSION}",
+            report.schema_version
+        )));
+    }
+    if report.totals.sessions != report.sessions_total {
+        return Err(ApiError::protocol(
+            "AgentsView Activity report has contradictory session totals",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_page_report_id(page: &SessionPage, expected: &str) -> Result<(), ApiError> {
+    if page.report_id == expected {
+        Ok(())
+    } else {
+        Err(ApiError::protocol(
+            "AgentsView changed report_id while paging Activity",
+        ))
+    }
+}
+
+fn replacement_report(page: SessionPage) -> Result<Report, ApiError> {
+    let report = page.report.ok_or_else(|| {
+        ApiError::protocol("AgentsView requested an Activity refresh without a replacement report")
+    })?;
+    if report.report_id.as_deref() != Some(page.report_id.as_str()) {
+        return Err(ApiError::protocol(
+            "AgentsView Activity replacement report_id does not match the page",
+        ));
+    }
+    Ok(*report)
+}
+
+fn append_session_page(
+    rows: &mut Vec<SessionRow>,
+    page: Vec<SessionRow>,
+    total: usize,
+) -> Result<(), ApiError> {
+    if rows.len().saturating_add(page.len()) > total {
+        return Err(ApiError::protocol(
+            "AgentsView returned more Activity sessions than the page total",
+        ));
+    }
+    rows.extend(page);
+    Ok(())
+}
+
+fn validate_cursor_progress(row_count: usize, next_cursor: Option<&str>) -> Result<(), ApiError> {
+    if row_count == 0 && next_cursor.is_some() {
+        Err(ApiError::protocol(
+            "AgentsView Activity session cursor did not advance",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_cursor_at_total(
+    row_count: usize,
+    total: usize,
+    next_cursor: Option<&str>,
+) -> Result<(), ApiError> {
+    if next_cursor.is_some() && row_count >= total {
+        Err(ApiError::protocol(
+            "AgentsView Activity report has a cursor after the final session",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_session_rows(rows: &[SessionRow], expected: usize) -> Result<(), ApiError> {
+    let actual = rows.len();
+    if actual == expected {
+        let unique = rows
+            .iter()
+            .map(|row| row.session_id.as_str())
+            .collect::<BTreeSet<_>>()
+            .len();
+        if unique == actual {
+            Ok(())
+        } else {
+            Err(ApiError::protocol(
+                "AgentsView repeated a session while paging Activity",
+            ))
+        }
+    } else {
+        Err(ApiError::protocol(format!(
+            "AgentsView Activity paging returned {actual} sessions; expected {expected}"
+        )))
     }
 }
 

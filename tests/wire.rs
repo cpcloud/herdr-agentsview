@@ -9,15 +9,17 @@ use herdr_agentsview::wire::{
 };
 
 // Contract recorded from kenn-io/agentsview revision
-// 14992d32da35a40c666eaaf3fa54a3d59f54d25f.
+// 5ae0f872d60357216d18373883953308c66b194f.
 #[test]
-fn report_v5_fixture_decodes_exact_contract() {
+fn report_v6_fixture_decodes_exact_contract() {
     // If AgentsView changes the versioned response shape without coordinated client work,
     // the dashboard must fail at the boundary instead of rendering invented defaults.
-    let report: Report = serde_json::from_str(include_str!("fixtures/report-v5.json"))
-        .expect("official schema-v5 fixture must decode");
+    let report: Report = serde_json::from_str(include_str!("fixtures/report-v6.json"))
+        .expect("recorded schema-v6 fixture must decode");
 
     assert_eq!(report.schema_version, ACTIVITY_SCHEMA_VERSION);
+    assert_eq!(report.report_id.as_deref(), Some("fixture-report-id"));
+    assert_eq!(report.sessions_total, report.by_session.len());
     assert_eq!(report.totals.sessions, 3);
     assert_eq!(report.by_session[2].timing_quality, TimingQuality::Untimed);
     assert_eq!(
@@ -40,7 +42,7 @@ fn nullable_pricing_bands_normalize_to_empty_typed_lists() {
     // If the official Go server emits an unbanded pricing rate as a nil slice,
     // JSON contains `bands: null`; rejecting it makes the Activity dashboard unavailable.
     let mut value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/report-v5.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     let resolution = &mut value["pricing"]["models"]["model-alpha"]["resolutions"][0];
     resolution["bands"] = serde_json::Value::Null;
     resolution["application"]["bands"] = serde_json::Value::Null;
@@ -58,7 +60,7 @@ fn nullable_untimed_session_models_normalize_to_an_empty_typed_list() {
     // If an untimed session has no usage attribution, the official Go constructor leaves
     // its models slice nil; rejecting the resulting null makes the whole report unavailable.
     let mut value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/report-v5.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     value["by_session"][2]["models"] = serde_json::Value::Null;
 
     let report = serde_json::from_value::<Report>(value)
@@ -72,8 +74,19 @@ fn unknown_contract_field_is_rejected() {
     // If a same-version response grows silently, strict decoding must force an explicit
     // compatibility decision rather than dropping data the UI may need.
     let mut value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/report-v5.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     value["unexpected"] = serde_json::json!(true);
+
+    assert!(serde_json::from_value::<Report>(value).is_err());
+}
+
+#[test]
+fn removed_v5_intervals_field_is_rejected() {
+    // If the v6 decoder silently accepts the removed intervals field, a mislabeled v5 payload
+    // can bypass the exact contract decision and revive obsolete client-side slicing.
+    let mut value: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
+    value["intervals"] = serde_json::json!([]);
 
     assert!(serde_json::from_value::<Report>(value).is_err());
 }
@@ -83,7 +96,7 @@ fn invalid_report_timezone_is_rejected_at_the_wire_boundary() {
     // If the report timezone remains an unchecked string, valid UTC instants can reach the
     // renderer without a reliable local-time interpretation.
     let mut value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/report-v5.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     value["timezone"] = serde_json::json!("not/a-timezone");
 
     assert!(serde_json::from_value::<Report>(value).is_err());
@@ -91,10 +104,10 @@ fn invalid_report_timezone_is_rejected_at_the_wire_boundary() {
 
 #[test]
 fn unknown_nested_field_and_closed_enum_are_rejected() {
-    // If a session row or closed enum changes under schema v5, accepting it would make
+    // If a session row or closed enum changes under schema v6, accepting it would make
     // sorting and timing-quality behavior silently incomplete.
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/report-v5.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     let mut extra_field = fixture.clone();
     extra_field["by_session"][0]["unexpected"] = serde_json::json!(true);
     let mut new_enum = fixture;

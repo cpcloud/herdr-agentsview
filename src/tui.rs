@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::api::{ActivityClient, ApiError};
-use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState};
+use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState, SessionPageRequest};
 use crate::config::PluginConfig;
 use crate::render::{self, TerminalCapabilities};
 use crate::wire::{AgentInfo, ProjectInfo, Report, ReportSelection};
@@ -39,6 +39,12 @@ enum Completion {
     Report {
         token: u64,
         result: Result<Box<Report>, ApiError>,
+        received_at: chrono::DateTime<Utc>,
+    },
+    SessionPage {
+        token: u64,
+        request: SessionPageRequest,
+        result: Result<crate::api::SessionFetch, ApiError>,
         received_at: chrono::DateTime<Utc>,
     },
     Projects {
@@ -60,6 +66,7 @@ pub struct Runtime {
     sender: mpsc::UnboundedSender<Completion>,
     receiver: mpsc::UnboundedReceiver<Completion>,
     report: Option<OwnedTask>,
+    session_page: Option<OwnedTask>,
     projects: Option<OwnedTask>,
     agents: Option<OwnedTask>,
     machines: Option<OwnedTask>,
@@ -90,6 +97,7 @@ impl Runtime {
             sender,
             receiver,
             report: None,
+            session_page: None,
             projects: None,
             agents: None,
             machines: None,
@@ -116,6 +124,8 @@ impl Runtime {
                 self.reset_report_backoff();
                 self.spawn_report(request);
             }
+            AppCommand::FetchSessionPage(request) => self.spawn_session_page(request),
+            AppCommand::CancelSessionPage => abort_task(&mut self.session_page),
             AppCommand::FetchMetadata(kind) => self.spawn_metadata(kind),
             AppCommand::Quit => return true,
         }
@@ -148,6 +158,7 @@ impl Runtime {
 
     fn spawn_report(&mut self, selection: ReportSelection) {
         abort_task(&mut self.report);
+        abort_task(&mut self.session_page);
         let token = self.next_task_token();
         let client = self.client.clone();
         let sender = self.sender.clone();
@@ -160,6 +171,26 @@ impl Runtime {
             });
         });
         self.report = Some(OwnedTask { token, handle });
+    }
+
+    fn spawn_session_page(&mut self, request: SessionPageRequest) {
+        abort_task(&mut self.session_page);
+        let token = self.next_task_token();
+        let client = self.client.clone();
+        let sender = self.sender.clone();
+        let task_request = request.clone();
+        let handle = self.executor.spawn(async move {
+            let result = client
+                .fetch_bucket_sessions(&task_request.report_id, task_request.bucket)
+                .await;
+            let _ = sender.send(Completion::SessionPage {
+                token,
+                request: task_request,
+                result,
+                received_at: Utc::now(),
+            });
+        });
+        self.session_page = Some(OwnedTask { token, handle });
     }
 
     fn spawn_metadata(&mut self, kind: MetadataKind) {
@@ -200,6 +231,20 @@ impl Runtime {
                 }
                 self.reset_report_backoff();
                 app.apply_report(result, received_at);
+                if let Some(request) = app.begin_session_page_request() {
+                    self.spawn_session_page(request);
+                }
+            }
+            Completion::SessionPage {
+                token,
+                request,
+                result,
+                received_at,
+            } => {
+                if !take_current(&mut self.session_page, token) {
+                    return false;
+                }
+                app.apply_session_page(&request, result, received_at);
             }
             Completion::Projects { token, result } => {
                 if !take_current(&mut self.projects, token) {
@@ -269,6 +314,7 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         abort_task(&mut self.report);
+        abort_task(&mut self.session_page);
         abort_task(&mut self.projects);
         abort_task(&mut self.agents);
         abort_task(&mut self.machines);
@@ -491,7 +537,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Rect;
 
-    use crate::api::ApiError;
+    use crate::api::{ApiError, SessionFetch};
     use crate::app::{App, AppCommand, InputKey};
     use crate::config::PluginConfig;
     use crate::wire::{Report, ReportSelection};
@@ -570,7 +616,7 @@ mod tests {
         let mut app = App::new(selection, Duration::from_secs(300));
         app.begin_foreground_load();
         let report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
         app.apply_report(
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
@@ -624,8 +670,8 @@ mod tests {
             handle: tokio::spawn(std::future::pending()),
         });
         let mut first_report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
-        first_report.totals.sessions = 41;
+            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
+        first_report.totals.output_tokens = 41;
         runtime
             .sender
             .send(Completion::Report {
@@ -646,8 +692,8 @@ mod tests {
         assert!(app.report().is_none());
 
         let mut replacement_report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v5.json")).unwrap();
-        replacement_report.totals.sessions = 42;
+            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
+        replacement_report.totals.output_tokens = 42;
         runtime
             .sender
             .send(Completion::Report {
@@ -658,6 +704,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(runtime.drain_events(&mut app), 1);
-        assert_eq!(app.report().unwrap().totals.sessions, 42);
+        assert_eq!(app.report().unwrap().totals.output_tokens, 42);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_session_page_completion_is_ignored_after_same_bucket_replacement() {
+        // If the task token gate is removed, a queued old page can satisfy the same report and
+        // bucket identity and overwrite the replacement request before its result arrives.
+        let config = PluginConfig {
+            api_base_url: "http://127.0.0.1:9/".parse().unwrap(),
+            request_timeout: Some(Duration::from_secs(2)),
+            refresh_interval: Duration::from_secs(300),
+            timezone: "America/New_York".parse().unwrap(),
+            auth: None,
+        };
+        let mut app = ready_app();
+        app.toggle_timeline_inspection();
+        let request = app
+            .begin_session_page_request()
+            .expect("active bucket page request");
+        let old_row = app.report().unwrap().by_session[0].clone();
+        let replacement_row = app.report().unwrap().by_session[1].clone();
+        let mut runtime = Runtime::new(&config).unwrap();
+        let first_token = runtime.next_task_token();
+        runtime.session_page = Some(OwnedTask {
+            token: first_token,
+            handle: tokio::spawn(std::future::pending()),
+        });
+        runtime
+            .sender
+            .send(Completion::SessionPage {
+                token: first_token,
+                request: request.clone(),
+                result: Ok(SessionFetch::Rows(vec![old_row])),
+                received_at: "2026-08-08T17:21:00Z".parse().unwrap(),
+            })
+            .unwrap();
+        assert!(!runtime.receiver.is_empty());
+
+        assert!(!runtime.dispatch(AppCommand::FetchSessionPage(request.clone())));
+        let replacement_token = runtime.session_page.as_ref().unwrap().token;
+        runtime.session_page.as_ref().unwrap().handle.abort();
+
+        assert_eq!(runtime.drain_events(&mut app), 0);
+        assert!(app.session_page_request().is_some());
+
+        runtime
+            .sender
+            .send(Completion::SessionPage {
+                token: replacement_token,
+                request,
+                result: Ok(SessionFetch::Rows(vec![replacement_row])),
+                received_at: "2026-08-08T17:22:00Z".parse().unwrap(),
+            })
+            .unwrap();
+
+        assert_eq!(runtime.drain_events(&mut app), 1);
+        assert_eq!(app.displayed_sessions()[0].session_id, "session-beta");
     }
 }

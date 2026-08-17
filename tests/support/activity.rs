@@ -16,7 +16,7 @@ pub fn selection() -> ReportSelection {
 }
 
 pub fn report() -> Report {
-    serde_json::from_str(include_str!("../fixtures/report-v5.json")).unwrap()
+    serde_json::from_str(include_str!("../fixtures/report-v6.json")).unwrap()
 }
 
 pub fn received_at() -> DateTime<Utc> {

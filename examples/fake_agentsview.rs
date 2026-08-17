@@ -7,23 +7,23 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use clap::Parser;
-use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report};
+use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report, SessionRow};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
-const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v5.json");
-const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v5.json");
-const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v5.json");
-const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v5.json");
+const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v6.json");
+const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v6.json");
+const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v6.json");
+const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v6.json");
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 #[derive(Parser)]
@@ -45,6 +45,7 @@ struct Args {
 #[derive(Default)]
 struct ServerState {
     report_count: AtomicUsize,
+    reports: Mutex<BTreeMap<String, Report>>,
 }
 
 #[derive(Serialize)]
@@ -60,6 +61,14 @@ struct AgentsBody {
 #[derive(Serialize)]
 struct MachinesBody {
     machines: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SessionPageBody {
+    report_id: String,
+    sessions: Vec<SessionRow>,
+    next_cursor: Option<String>,
+    total: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,6 +131,7 @@ async fn serve(
     let url =
         Url::parse(&format!("http://127.0.0.1{target}")).context("parse fake request target")?;
     let query = url.query_pairs().into_owned().collect::<BTreeMap<_, _>>();
+    let session_report_id = session_report_id(url.path());
     let (status, body) = match url.path() {
         "/api/v1/activity/report" => {
             let ordinal = state.report_count.fetch_add(1, Ordering::SeqCst) + 1;
@@ -139,11 +149,29 @@ async fn serve(
                     r#"{"error":"simulated refresh failure"}"#.to_owned(),
                 )
             } else {
+                let report = scenario_report(&query)?;
+                remember_report(&state, &report)?;
                 (
                     "200 OK",
-                    serde_json::to_string(&scenario_report(&query)?)
-                        .context("encode fake Activity report")?,
+                    serde_json::to_string(&report).context("encode fake Activity report")?,
                 )
+            }
+        }
+        _ if session_report_id.is_some() => {
+            let report_id = session_report_id.expect("guarded session report ID");
+            match session_page(&state, report_id, &query) {
+                Ok(Some(page)) => (
+                    "200 OK",
+                    serde_json::to_string(&page).context("encode fake Activity session page")?,
+                ),
+                Ok(None) => (
+                    "404 Not Found",
+                    r#"{"error":"report not found"}"#.to_owned(),
+                ),
+                Err(_) => (
+                    "400 Bad Request",
+                    r#"{"error":"invalid session-page request"}"#.to_owned(),
+                ),
             }
         }
         "/api/v1/projects" => (
@@ -164,6 +192,71 @@ async fn serve(
         _ => ("404 Not Found", r#"{"error":"route not found"}"#.to_owned()),
     };
     write_json_response(&mut stream, status, &body).await
+}
+
+fn session_report_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/v1/activity/report/")
+        .and_then(|value| value.strip_suffix("/sessions"))
+        .filter(|value| !value.is_empty() && !value.contains('/'))
+}
+
+fn remember_report(state: &ServerState, report: &Report) -> anyhow::Result<()> {
+    let Some(report_id) = report.report_id.as_ref() else {
+        return Ok(());
+    };
+    state
+        .reports
+        .lock()
+        .map_err(|_| anyhow::anyhow!("fake Activity report cache lock poisoned"))?
+        .insert(report_id.clone(), report.clone());
+    Ok(())
+}
+
+fn session_page(
+    state: &ServerState,
+    report_id: &str,
+    query: &BTreeMap<String, String>,
+) -> anyhow::Result<Option<SessionPageBody>> {
+    let bucket_index = query
+        .get("bucket")
+        .context("fake session-page request is missing bucket")?
+        .parse::<usize>()
+        .context("parse fake session-page bucket")?;
+    let reports = state
+        .reports
+        .lock()
+        .map_err(|_| anyhow::anyhow!("fake Activity report cache lock poisoned"))?;
+    let Some(report) = reports.get(report_id) else {
+        return Ok(None);
+    };
+    let bucket = report
+        .buckets
+        .get(bucket_index)
+        .context("fake session-page bucket is outside the report")?;
+    let sessions = report
+        .by_session
+        .iter()
+        .filter(|session| session_overlaps_bucket(session, bucket))
+        .cloned()
+        .collect::<Vec<_>>();
+    let total = sessions.len();
+    Ok(Some(SessionPageBody {
+        report_id: report_id.to_owned(),
+        sessions,
+        next_cursor: None,
+        total,
+    }))
+}
+
+fn session_overlaps_bucket(session: &SessionRow, bucket: &Bucket) -> bool {
+    let (Some(first), Some(last)) = (session.first_active, session.last_active) else {
+        return false;
+    };
+    if first == last {
+        bucket.start <= first && first < bucket.end
+    } else {
+        first < bucket.end && last > bucket.start
+    }
 }
 
 async fn read_request(stream: &mut TcpStream) -> anyhow::Result<String> {
@@ -296,10 +389,6 @@ fn align_report_date(
             .last_active
             .take()
             .map(|value| shift_timestamp(value, delta));
-    }
-    for interval in &mut report.intervals {
-        interval.start = shift_timestamp(interval.start, delta);
-        interval.end = shift_timestamp(interval.end, delta);
     }
     Ok(())
 }
@@ -466,10 +555,81 @@ fn write_config(path: &Path, port: u16) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     use chrono::{NaiveTime, TimeDelta};
+    use herdr_agentsview::wire::{Report, SessionPage};
+    use reqwest::StatusCode;
+    use tokio::net::TcpListener;
 
-    use super::{scenario_for_query, scenario_report, ReportScenario};
+    use super::{scenario_for_query, scenario_report, serve, Args, ReportScenario, ServerState};
+
+    #[tokio::test]
+    async fn v6_session_route_serves_bucket_specific_demo_rows() {
+        // If the fake server does not track the v6 session-page boundary, entering timeline
+        // inspection turns an otherwise healthy packaged demo into an HTTP error.
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let args = Arc::new(Args {
+            config_out: PathBuf::from("unused-by-request-handler"),
+            initial_delay_ms: 0,
+            refresh_delay_ms: 0,
+            error_on_refresh: false,
+        });
+        let state = Arc::new(ServerState::default());
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                serve(stream, Arc::clone(&args), Arc::clone(&state))
+                    .await
+                    .unwrap();
+            }
+        });
+        let client = reqwest::Client::new();
+        let base_url = format!("http://{address}");
+        let report_response = client
+            .get(format!(
+                "{base_url}/api/v1/activity/report?date=2026-08-17&timezone=America%2FNew_York"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(report_response.status(), StatusCode::OK);
+        let report = report_response.json::<Report>().await.unwrap();
+        let report_id = report.report_id.as_deref().unwrap();
+        let active_bucket = report
+            .buckets
+            .iter()
+            .position(|bucket| bucket.max_agents > 0)
+            .unwrap();
+
+        let inactive = client
+            .get(format!(
+                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket=0"
+            ))
+            .send()
+            .await
+            .unwrap();
+        let active = client
+            .get(format!(
+                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket={active_bucket}"
+            ))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(inactive.status(), StatusCode::OK);
+        assert_eq!(active.status(), StatusCode::OK);
+        let inactive = inactive.json::<SessionPage>().await.unwrap();
+        let active = active.json::<SessionPage>().await.unwrap();
+        assert!(inactive.sessions.is_empty());
+        assert!(!active.sessions.is_empty());
+        assert_eq!(active.total, active.sessions.len());
+        server.await.unwrap();
+    }
 
     #[test]
     fn default_query_selects_a_busy_workday_fixture() {

@@ -124,11 +124,7 @@ impl App {
                 hint("←/→", "bucket", "←/→ bucket"),
                 hint("Enter", "all sessions", "Enter all"),
             ],
-            Focus::Timeline
-                if self
-                    .report()
-                    .is_some_and(|report| !report.buckets.is_empty()) =>
-            {
+            Focus::Timeline if self.timeline_inspection_available() => {
                 vec![hint("Enter", "slice sessions", "Enter slice")]
             }
             Focus::Timeline => Vec::new(),
@@ -203,12 +199,20 @@ impl App {
                 }
             }
             Focus::Timeline => match key {
-                InputKey::Enter => self.toggle_timeline_inspection(),
+                InputKey::Enter
+                    if self.timeline_inspection_active()
+                        || self.timeline_inspection_available() =>
+                {
+                    self.toggle_timeline_inspection();
+                    return Some(self.session_page_command());
+                }
                 InputKey::Left | InputKey::Char('h') if self.timeline_inspection_active() => {
                     self.move_timeline(-1);
+                    return Some(self.session_page_command());
                 }
                 InputKey::Right | InputKey::Char('l') if self.timeline_inspection_active() => {
                     self.move_timeline(1);
+                    return Some(self.session_page_command());
                 }
                 _ => {}
             },
@@ -246,6 +250,11 @@ impl App {
 
     fn foreground_command(&mut self) -> Option<AppCommand> {
         Some(AppCommand::FetchReport(self.begin_foreground_load()))
+    }
+
+    fn session_page_command(&mut self) -> AppCommand {
+        self.begin_session_page_request()
+            .map_or(AppCommand::CancelSessionPage, AppCommand::FetchSessionPage)
     }
 
     fn select_compact_breakdown(&mut self, category: BreakdownCategory) {

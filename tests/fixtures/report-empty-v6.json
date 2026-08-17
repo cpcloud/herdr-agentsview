@@ -1,5 +1,6 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
+  "report_id": "empty-report-id",
   "pricing": null,
   "projects": {},
   "timezone": "America/New_York",
@@ -69,5 +70,5 @@
   "by_model": [],
   "by_agent": [],
   "by_session": [],
-  "intervals": []
+  "sessions_total": 0
 }

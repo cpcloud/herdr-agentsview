@@ -387,6 +387,27 @@ fn unavailable_timeline_does_not_advertise_an_inert_slice() {
 }
 
 #[test]
+fn report_without_a_page_id_keeps_timeline_slicing_unavailable() {
+    // If the valid v6 fallback without report_id advertises slicing, Enter replaces a populated
+    // session table with an empty slice that no server request can ever fill.
+    let mut value = activity_support::report();
+    value.report_id = None;
+    let expected_sessions = value.by_session.len();
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value)), Utc::now());
+    app.set_focus(Focus::Timeline);
+
+    let hints = app.contextual_keys();
+    let command = app.handle_input(InputKey::Enter, today());
+
+    assert!(!hints.iter().any(|hint| hint.key == "Enter"));
+    assert!(command.is_none());
+    assert!(!app.timeline_inspection_active());
+    assert_eq!(app.sorted_sessions().len(), expected_sessions);
+}
+
+#[test]
 fn stale_report_advertises_retry_consistently() {
     // If the stale header and footer name different actions for the same key, recovery copy is
     // internally contradictory even though both paths issue the same request.
@@ -443,17 +464,32 @@ fn timeline_and_breakdown_keys_change_only_the_focused_region() {
     app.handle_input(InputKey::Right, today());
     assert_eq!(app.timeline_cursor(), 0);
 
-    app.handle_input(InputKey::Enter, today());
+    let command = app.handle_input(InputKey::Enter, today());
+    assert!(matches!(
+        command,
+        Some(AppCommand::FetchSessionPage(request))
+            if request.report_id == "fixture-report-id" && request.bucket == 0
+    ));
     assert!(app.timeline_inspection_active());
-    app.handle_input(InputKey::Right, today());
+    let command = app.handle_input(InputKey::Right, today());
+    assert!(matches!(
+        command,
+        Some(AppCommand::FetchSessionPage(request)) if request.bucket == 1
+    ));
     assert_eq!(app.timeline_cursor(), 1);
     assert_eq!(app.breakdown_category(), BreakdownCategory::Project);
 
-    app.handle_input(InputKey::Enter, today());
+    assert_eq!(
+        app.handle_input(InputKey::Enter, today()),
+        Some(AppCommand::CancelSessionPage)
+    );
     assert!(!app.timeline_inspection_active());
     app.handle_input(InputKey::Right, today());
     assert_eq!(app.timeline_cursor(), 1);
-    app.handle_input(InputKey::Enter, today());
+    assert!(matches!(
+        app.handle_input(InputKey::Enter, today()),
+        Some(AppCommand::FetchSessionPage(request)) if request.bucket == 1
+    ));
     assert!(app.timeline_inspection_active());
     assert_eq!(app.timeline_cursor(), 1);
 

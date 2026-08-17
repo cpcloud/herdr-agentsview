@@ -661,7 +661,7 @@ mod tests {
     }
 
     fn fixture_report() -> Report {
-        serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json"))
+        serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json"))
             .expect("fixture follows the report contract")
     }
 }

@@ -8,7 +8,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use chrono_tz::Tz;
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const ACTIVITY_SCHEMA_VERSION: u32 = 5;
+pub const ACTIVITY_SCHEMA_VERSION: u32 = 6;
 
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
@@ -138,6 +138,7 @@ pub enum TimingQuality {
 #[serde(deny_unknown_fields)]
 pub struct Report {
     pub schema_version: u32,
+    pub report_id: Option<String>,
     pub pricing: Option<PricingBlock>,
     pub projects: BTreeMap<String, ProjectMapEntry>,
     pub timezone: Tz,
@@ -157,7 +158,8 @@ pub struct Report {
     pub by_model: Vec<KeyMinutes>,
     pub by_agent: Vec<KeyMinutes>,
     pub by_session: Vec<SessionRow>,
-    pub intervals: Vec<ReportInterval>,
+    pub sessions_next_cursor: Option<String>,
+    pub sessions_total: usize,
 }
 
 impl Report {
@@ -194,6 +196,19 @@ impl Report {
     pub(crate) fn bucket_is_future(&self, bucket: &Bucket) -> bool {
         self.partial && bucket.start >= self.effective_end
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionPage {
+    pub report_id: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
+    pub sessions: Vec<SessionRow>,
+    pub next_cursor: Option<String>,
+    pub total: usize,
+    #[serde(default)]
+    pub refresh_required: bool,
+    pub report: Option<Box<Report>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -294,14 +309,6 @@ pub struct Bucket {
     pub cost: Money,
     pub automated_at_peak: usize,
     pub interactive_at_peak: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReportInterval {
-    pub session_id: String,
-    pub start: DateTime<FixedOffset>,
-    pub end: DateTime<FixedOffset>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
