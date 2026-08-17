@@ -118,6 +118,13 @@ pub(super) fn render(
             with_compact_sort(title, app, compact)
         }
         (Some(report), Some(bucket)) => {
+            let row_count = if app.session_page_loading() {
+                "loading".to_owned()
+            } else if app.session_rows_for_active_bucket().is_some() {
+                rows.len().to_string()
+            } else {
+                "unavailable".to_owned()
+            };
             let title = format!(
                 " Sessions in {} ({}) ",
                 format_interval(
@@ -125,7 +132,7 @@ pub(super) fn render(
                     report.observed_bucket_end(bucket),
                     report.timezone,
                 ),
-                rows.len()
+                row_count
             );
             with_compact_sort(title, app, compact)
         }
@@ -463,7 +470,8 @@ mod tests {
     use ratatui::style::Color;
 
     use super::render;
-    use crate::app::{App, ColorMode, Focus};
+    use crate::api::{ApiError, SessionFetch};
+    use crate::app::{App, AppCommand, ColorMode, Focus, InputKey};
     use crate::render::layout::LayoutClass;
     use crate::render::style::Palette;
     use crate::wire::{Report, ReportSelection};
@@ -505,14 +513,12 @@ mod tests {
     }
 
     #[test]
-    fn timeline_preview_slices_sessions_by_exact_activity_intervals() {
-        // If bucket preview uses the full session window or leaves the table unsliced, the
-        // rows below the chart claim activity that did not occur in the inspected interval.
-        let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json")).unwrap();
-        report
-            .intervals
-            .retain(|interval| interval.session_id == "session-alpha");
+    fn timeline_preview_slices_sessions_by_exact_server_membership() {
+        // If bucket preview ignores the server's exact membership page, the rows below the
+        // chart can claim activity that did not occur in the inspected interval.
+        let report: Report =
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+        let bucket_rows = vec![report.by_session[0].clone()];
         let mut app = app_with_report(report);
         app.set_focus(Focus::Timeline);
         let area = Rect::new(0, 0, 120, 6);
@@ -532,6 +538,7 @@ mod tests {
         assert!(inactive.contains("Imported activity"), "{inactive}");
 
         app.toggle_timeline_inspection();
+        apply_bucket_rows(&mut app, bucket_rows.clone());
         let mut buffer = Buffer::empty(area);
         render(
             &mut buffer,
@@ -548,6 +555,7 @@ mod tests {
         assert!(!preview.contains("Imported activity"), "{preview}");
 
         app.move_timeline(1);
+        apply_bucket_rows(&mut app, bucket_rows);
         let mut partial_buffer = Buffer::empty(area);
         render(
             &mut partial_buffer,
@@ -589,18 +597,15 @@ mod tests {
     }
 
     #[test]
-    fn bucket_slice_includes_an_instant_at_the_bucket_start() {
-        // If the overlap predicate treats a zero-duration interval at the left boundary as
-        // empty, its session disappears from the exact bucket where the event occurred.
-        let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json")).unwrap();
-        report
-            .intervals
-            .retain(|interval| interval.session_id == "session-beta");
-        report.intervals[0].start = report.buckets[0].start;
-        report.intervals[0].end = report.buckets[0].start;
+    fn bucket_slice_uses_only_rows_returned_by_agentsview() {
+        // If the client approximates membership from a session window, an idle session can
+        // appear in a bucket even though AgentsView deliberately omitted it from the page.
+        let report: Report =
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+        let bucket_rows = vec![report.by_session[1].clone()];
         let mut app = app_with_report(report);
         app.toggle_timeline_inspection();
+        apply_bucket_rows(&mut app, bucket_rows);
         let area = Rect::new(0, 0, 120, 6);
         let mut buffer = Buffer::empty(area);
 
@@ -617,11 +622,113 @@ mod tests {
     }
 
     #[test]
+    fn pending_bucket_page_is_distinct_from_a_completed_empty_page() {
+        // If a cache miss is rendered as an empty result, network latency falsely claims that
+        // the inspected bucket contains zero sessions before AgentsView has answered.
+        let mut app = ready_app();
+        app.set_focus(Focus::Timeline);
+        let Some(AppCommand::FetchSessionPage(request)) = app.handle_input(
+            InputKey::Enter,
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+        ) else {
+            panic!("timeline inspection must request its bucket page");
+        };
+        let area = Rect::new(0, 0, 120, 6);
+        let mut loading_buffer = Buffer::empty(area);
+
+        render(
+            &mut loading_buffer,
+            area,
+            &app,
+            LayoutClass::Wide,
+            Palette::new(ColorMode::Color),
+        );
+
+        let loading = buffer_text(&loading_buffer);
+        assert!(loading.contains("(loading)"), "{loading}");
+        assert!(!loading.contains("(0)"), "{loading}");
+
+        app.apply_session_page(
+            &request,
+            Ok(SessionFetch::Rows(Vec::new())),
+            "2026-08-08T17:21:01Z".parse().unwrap(),
+        );
+        let mut empty_buffer = Buffer::empty(area);
+        render(
+            &mut empty_buffer,
+            area,
+            &app,
+            LayoutClass::Wide,
+            Palette::new(ColorMode::Color),
+        );
+
+        let empty = buffer_text(&empty_buffer);
+        assert!(empty.contains("(0)"), "{empty}");
+        assert!(!empty.contains("(loading)"), "{empty}");
+    }
+
+    #[test]
+    fn unresolved_bucket_page_never_claims_a_completed_zero() {
+        // If refresh cancellation or a page error is treated as an empty cache entry, the title
+        // claims a real zero even though AgentsView never completed the bucket membership page.
+        let area = Rect::new(0, 0, 120, 6);
+        let mut refreshing = ready_app();
+        refreshing.set_focus(Focus::Timeline);
+        assert!(matches!(
+            refreshing.handle_input(
+                InputKey::Enter,
+                NaiveDate::from_ymd_opt(2026, 8, 8).unwrap()
+            ),
+            Some(AppCommand::FetchSessionPage(_))
+        ));
+        refreshing.begin_refresh().unwrap();
+        let mut refreshing_buffer = Buffer::empty(area);
+        render(
+            &mut refreshing_buffer,
+            area,
+            &refreshing,
+            LayoutClass::Wide,
+            Palette::new(ColorMode::Color),
+        );
+        let refreshing_text = buffer_text(&refreshing_buffer);
+        assert!(
+            refreshing_text.contains("(unavailable)"),
+            "{refreshing_text}"
+        );
+        assert!(!refreshing_text.contains("(0)"), "{refreshing_text}");
+
+        let mut failed = ready_app();
+        failed.set_focus(Focus::Timeline);
+        let Some(AppCommand::FetchSessionPage(request)) = failed.handle_input(
+            InputKey::Enter,
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+        ) else {
+            panic!("timeline inspection must request its bucket page");
+        };
+        failed.apply_session_page(
+            &request,
+            Err(ApiError::timeout()),
+            "2026-08-08T17:21:01Z".parse().unwrap(),
+        );
+        let mut failed_buffer = Buffer::empty(area);
+        render(
+            &mut failed_buffer,
+            area,
+            &failed,
+            LayoutClass::Wide,
+            Palette::new(ColorMode::Color),
+        );
+        let failed_text = buffer_text(&failed_buffer);
+        assert!(failed_text.contains("(unavailable)"), "{failed_text}");
+        assert!(!failed_text.contains("(0)"), "{failed_text}");
+    }
+
+    #[test]
     fn wholly_future_bucket_has_a_future_title_and_no_session_rows() {
         // If a future bucket falls through to ordinary overlap filtering, the Sessions pane
         // can claim rows in a time range the report has not observed.
         let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
         report.effective_end = report.buckets[0].end;
         report.elapsed_bucket_count = 1;
         let mut app = app_with_report(report);
@@ -646,8 +753,17 @@ mod tests {
 
     fn ready_app() -> App {
         let report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v5.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
         app_with_report(report)
+    }
+
+    fn apply_bucket_rows(app: &mut App, rows: Vec<crate::wire::SessionRow>) {
+        let request = app.session_page_request().expect("active bucket request");
+        app.apply_session_page(
+            &request,
+            Ok(SessionFetch::Rows(rows)),
+            "2026-08-08T17:21:01Z".parse().unwrap(),
+        );
     }
 
     fn app_with_report(report: Report) -> App {

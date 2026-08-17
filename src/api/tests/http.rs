@@ -12,7 +12,7 @@ use rustls::ServerConfig;
 use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 use url::Url;
@@ -143,24 +143,31 @@ impl ResponsePlan {
 
 pub(super) struct RecordingServer {
     base_url: Url,
-    request: Option<oneshot::Receiver<RecordedRequest>>,
+    requests: mpsc::UnboundedReceiver<RecordedRequest>,
     task: Option<JoinHandle<io::Result<()>>>,
 }
 
 impl RecordingServer {
     pub async fn start(plan: ResponsePlan) -> Self {
+        Self::start_sequence(vec![plan]).await
+    }
+
+    pub async fn start_sequence(plans: Vec<ResponsePlan>) -> Self {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
             .unwrap();
         let address = listener.local_addr().unwrap();
-        let (request_tx, request_rx) = oneshot::channel();
+        let (request_tx, requests) = mpsc::unbounded_channel();
         let task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await?;
-            serve_connection(stream, plan, None, request_tx).await
+            for plan in plans {
+                let (stream, _) = listener.accept().await?;
+                serve_connection(stream, plan, None, request_tx.clone()).await?;
+            }
+            Ok(())
         });
         Self {
             base_url: Url::parse(&format!("http://{address}/")).unwrap(),
-            request: Some(request_rx),
+            requests,
             task: Some(task),
         }
     }
@@ -195,7 +202,7 @@ impl RecordingServer {
             .await
             .unwrap();
         let address = listener.local_addr().unwrap();
-        let (request_tx, request_rx) = oneshot::channel();
+        let (request_tx, requests) = mpsc::unbounded_channel();
         let task = tokio::spawn(async move {
             let (stream, _) = listener.accept().await?;
             let stream = acceptor.accept(stream).await.map_err(io::Error::other)?;
@@ -204,7 +211,7 @@ impl RecordingServer {
         (
             Self {
                 base_url: Url::parse(&format!("https://{address}/")).unwrap(),
-                request: Some(request_rx),
+                requests,
                 task: Some(task),
             },
             root,
@@ -216,9 +223,8 @@ impl RecordingServer {
     }
 
     pub async fn take_request(&mut self) -> RecordedRequest {
-        self.request
-            .take()
-            .expect("request already consumed")
+        self.requests
+            .recv()
             .await
             .expect("recording server stopped before receiving a request")
     }
@@ -243,7 +249,7 @@ async fn serve_connection<S>(
     mut stream: S,
     plan: ResponsePlan,
     expected_bearer: Option<SecretString>,
-    request_tx: oneshot::Sender<RecordedRequest>,
+    request_tx: mpsc::UnboundedSender<RecordedRequest>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,

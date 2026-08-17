@@ -16,15 +16,15 @@ use crate::config::PluginConfig;
 use crate::wire::{Automation, ReportSelection};
 
 use super::{
-    safe_contract_path, safe_excerpt, ActivityClient, ApiErrorKind, MAX_ERROR_BODY_BYTES,
-    MAX_SUCCESS_BODY_BYTES,
+    safe_contract_path, safe_excerpt, ActivityClient, ApiErrorKind, SessionFetch,
+    MAX_ERROR_BODY_BYTES, MAX_SUCCESS_BODY_BYTES,
 };
 
 mod http;
 
 use http::{RecordingServer, ResponsePlan};
 
-const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v5.json");
+const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v6.json");
 const PROJECTS_FIXTURE: &str = include_str!("../../tests/fixtures/projects.json");
 const AGENTS_FIXTURE: &str = include_str!("../../tests/fixtures/agents.json");
 const MACHINES_FIXTURE: &str = include_str!("../../tests/fixtures/machines.json");
@@ -391,14 +391,261 @@ async fn malformed_json_is_a_protocol_error() {
 }
 
 #[tokio::test]
+async fn current_v6_report_reaches_the_client() {
+    // If standalone AgentsView advances its Activity contract while this strict client stays
+    // stale, opening the dashboard fails before any report data reaches the app.
+    let server = RecordingServer::start(ResponsePlan::json(REPORT_FIXTURE)).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let report = client.fetch_report(&selection()).await.unwrap();
+
+    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.by_session[0].session_id, "session-alpha");
+}
+
+#[tokio::test]
+async fn current_v6_report_hydrates_every_session_page_for_local_sorts() {
+    // If the v6 cursor is ignored, title and model sorts operate on only the bounded first
+    // page even though the dashboard presents them as full-report sorts.
+    let mut first: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    let remaining = first["by_session"].as_array_mut().unwrap().split_off(1);
+    first["sessions_next_cursor"] = serde_json::json!("fixture-cursor");
+    let continuation = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": remaining,
+        "total": 3
+    });
+    let mut server = RecordingServer::start_sequence(vec![
+        ResponsePlan::json(serde_json::to_vec(&first).unwrap()),
+        ResponsePlan::json(serde_json::to_vec(&continuation).unwrap()),
+    ])
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let report = client.fetch_report(&selection()).await.unwrap();
+    let report_request = server.take_request().await;
+    let page_request = server.take_request().await;
+
+    assert_eq!(report.by_session.len(), report.sessions_total);
+    assert_eq!(report.by_session[2].session_id, "session-gamma");
+    assert_eq!(report_request.path, "/api/v1/activity/report");
+    assert_eq!(
+        page_request.path,
+        "/api/v1/activity/report/fixture-report-id/sessions"
+    );
+    assert_eq!(
+        page_request.query,
+        vec![
+            ("limit".to_owned(), "500".to_owned()),
+            ("cursor".to_owned(), "fixture-cursor".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn report_rejects_disagreeing_v6_session_totals() {
+    // If summary and paging totals can diverge, the header and session table describe
+    // different populations even after every declared page has been loaded.
+    let mut report: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    report["totals"]["sessions"] = serde_json::json!(4);
+    let server =
+        RecordingServer::start(ResponsePlan::json(serde_json::to_vec(&report).unwrap())).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client.fetch_report(&selection()).await.unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("session totals"));
+}
+
+#[tokio::test]
+async fn report_rejects_a_cursor_after_the_declared_final_row() {
+    // If a continuation cursor survives after the accumulated row count reaches total, an
+    // impossible extra page can be requested and a malformed transcript accepted as complete.
+    let mut first: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    let remaining = first["by_session"].as_array_mut().unwrap().split_off(1);
+    first["sessions_next_cursor"] = serde_json::json!("first-cursor");
+    let final_rows = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": remaining,
+        "next_cursor": "cursor-after-final-row",
+        "total": 3
+    });
+    let empty_terminal_page = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": [],
+        "total": 3
+    });
+    let server = RecordingServer::start_sequence(vec![
+        ResponsePlan::json(serde_json::to_vec(&first).unwrap()),
+        ResponsePlan::json(serde_json::to_vec(&final_rows).unwrap()),
+        ResponsePlan::json(serde_json::to_vec(&empty_terminal_page).unwrap()),
+    ])
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client.fetch_report(&selection()).await.unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("cursor after the final session"));
+}
+
+#[tokio::test]
+async fn bucket_sessions_use_the_exact_server_page_and_bucket_index() {
+    // If the plugin approximates bucket membership from first/last activity, sessions with an
+    // idle gap appear active even when AgentsView omits them from the exact membership page.
+    let fixture: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    let page = serde_json::json!({
+        "report_id": "fixture/report id",
+        "sessions": [fixture["by_session"][0].clone()],
+        "total": 1
+    });
+    let mut server =
+        RecordingServer::start(ResponsePlan::json(serde_json::to_vec(&page).unwrap())).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let result = client
+        .fetch_bucket_sessions("fixture/report id", 7)
+        .await
+        .unwrap();
+    let request = server.take_request().await;
+
+    let SessionFetch::Rows(rows) = result else {
+        panic!("stable bucket page must return rows");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].session_id, "session-alpha");
+    assert_eq!(
+        request.path,
+        "/api/v1/activity/report/fixture%2Freport%20id/sessions"
+    );
+    assert_eq!(
+        request.query,
+        vec![
+            ("limit".to_owned(), "500".to_owned()),
+            ("sort".to_owned(), "agent_minutes".to_owned()),
+            ("direction".to_owned(), "desc".to_owned()),
+            ("bucket".to_owned(), "7".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn bucket_sessions_reject_a_cursor_after_the_declared_final_row() {
+    // If bucket paging loses its final-cursor check, an impossible extra page can be requested
+    // and accepted even though exact timeline membership already reached the declared total.
+    let fixture: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    let first = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": [fixture["by_session"][0].clone()],
+        "next_cursor": "first-bucket-cursor",
+        "total": 2
+    });
+    let final_rows = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": [fixture["by_session"][1].clone()],
+        "next_cursor": "cursor-after-final-bucket-row",
+        "total": 2
+    });
+    let empty_terminal_page = serde_json::json!({
+        "report_id": "fixture-report-id",
+        "sessions": [],
+        "total": 2
+    });
+    let server = RecordingServer::start_sequence(vec![
+        ResponsePlan::json(serde_json::to_vec(&first).unwrap()),
+        ResponsePlan::json(serde_json::to_vec(&final_rows).unwrap()),
+        ResponsePlan::json(serde_json::to_vec(&empty_terminal_page).unwrap()),
+    ])
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client
+        .fetch_bucket_sessions("fixture-report-id", 0)
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("cursor after the final session"));
+}
+
+#[tokio::test]
+async fn bucket_refresh_replaces_the_report_generation_atomically() {
+    // If refresh rows are appended to the old generation, totals and session membership can
+    // combine two different source snapshots under one report ID.
+    let mut replacement: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    replacement["report_id"] = serde_json::json!("replacement-report-id");
+    let page = serde_json::json!({
+        "report_id": "replacement-report-id",
+        "sessions": replacement["by_session"].clone(),
+        "total": replacement["sessions_total"].clone(),
+        "refresh_required": true,
+        "report": replacement
+    });
+    let server =
+        RecordingServer::start(ResponsePlan::json(serde_json::to_vec(&page).unwrap())).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let result = client
+        .fetch_bucket_sessions("old-report-id", 0)
+        .await
+        .unwrap();
+
+    let SessionFetch::Refreshed(report) = result else {
+        panic!("changed generation must replace the report");
+    };
+    assert_eq!(report.report_id.as_deref(), Some("replacement-report-id"));
+    assert_eq!(report.by_session.len(), report.sessions_total);
+}
+
+#[tokio::test]
 async fn report_schema_version_is_required_and_exact() {
     // If version preflight is skipped, incompatible fields can be reported only as vague
     // deserialization failures without identifying the server/client mismatch.
     for (body, expected) in [
         (r#"{}"#, "missing schema_version"),
         (
-            r#"{"schema_version":6}"#,
-            "unsupported Activity schema version 6",
+            r#"{"schema_version":5}"#,
+            "unsupported Activity schema version 5",
+        ),
+        (
+            r#"{"schema_version":7}"#,
+            "unsupported Activity schema version 7",
         ),
     ] {
         let server = RecordingServer::start(ResponsePlan::json(body)).await;
@@ -420,7 +667,7 @@ async fn report_schema_version_is_required_and_exact() {
 async fn well_formed_json_with_an_invalid_version_type_is_a_contract_error() {
     // If a valid JSON response with the wrong envelope type is called malformed JSON,
     // operators cannot distinguish transport corruption from an incompatible API.
-    let server = RecordingServer::start(ResponsePlan::json(r#"{"schema_version":"5"}"#)).await;
+    let server = RecordingServer::start(ResponsePlan::json(r#"{"schema_version":"6"}"#)).await;
     let client = ActivityClient::new(&config(
         server.base_url().clone(),
         None,
@@ -437,7 +684,7 @@ async fn well_formed_json_with_an_invalid_version_type_is_a_contract_error() {
 
 #[tokio::test]
 async fn same_version_unknown_field_is_a_contract_error() {
-    // If strict schema-v5 decoding is bypassed after version preflight, new fields are
+    // If strict schema-v6 decoding is bypassed after version preflight, new fields are
     // silently discarded and the UI can misrepresent server-computed totals.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     value["unexpected"] = serde_json::json!(true);
@@ -453,12 +700,12 @@ async fn same_version_unknown_field_is_a_contract_error() {
     let error = client.fetch_report(&selection()).await.unwrap_err();
 
     assert_eq!(error.kind, ApiErrorKind::Protocol);
-    assert!(error.to_string().contains("schema v5 contract"));
+    assert!(error.to_string().contains("schema v6 contract"));
 }
 
 #[tokio::test]
 async fn same_version_nested_shape_error_identifies_the_contract_path() {
-    // If a nested field changes under schema v5, a generic mismatch leaves operators unable
+    // If a nested field changes under schema v6, a generic mismatch leaves operators unable
     // to distinguish an upstream contract change from a stale fixture without exposing data.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     value["pricing"]["models"]["model-alpha"]["resolutions"][0]["bands"] =
@@ -603,7 +850,7 @@ async fn unprintable_contract_path_falls_back_to_the_generic_message() {
 
     assert_eq!(
         rendered,
-        "AgentsView response does not match the schema v5 contract"
+        "AgentsView response does not match the schema v6 contract"
     );
 }
 

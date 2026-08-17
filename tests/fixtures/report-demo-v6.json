@@ -1,5 +1,6 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
+  "report_id": "demo-report-id",
   "range_start": "2026-08-08T13:00:00Z",
   "range_end": "2026-08-08T21:30:00Z",
   "effective_end": "2026-08-08T21:20:00Z",
@@ -78,19 +79,7 @@
     { "session_id": "session-dashboard-plan", "project_key": "pl1-alpha", "title": "Plan dashboard refresh", "project": "project-alpha", "agent": "codex", "primary_model": "model-alpha", "models": ["model-alpha"], "agent_minutes": 35.0, "cost": { "microdollars": 3200000 }, "output_tokens": 1200, "first_active": "2026-08-08T13:00:00Z", "last_active": "2026-08-08T13:35:00Z", "timing_quality": "timed", "is_automated": false },
     { "session_id": "session-imported", "project_key": "pl1-beta", "title": "Imported historical run", "project": "project-beta", "agent": "codex", "primary_model": "model-gamma", "models": ["model-gamma"], "agent_minutes": null, "cost": { "microdollars": 1200000 }, "output_tokens": 550, "first_active": null, "last_active": null, "timing_quality": "untimed", "is_automated": false }
   ],
-  "intervals": [
-    { "session_id": "session-dashboard-plan", "start": "2026-08-08T13:00:00Z", "end": "2026-08-08T13:35:00Z" },
-    { "session_id": "session-api-latency", "start": "2026-08-08T13:20:00Z", "end": "2026-08-08T14:10:00Z" },
-    { "session_id": "session-nix-package", "start": "2026-08-08T14:15:00Z", "end": "2026-08-08T15:00:00Z" },
-    { "session_id": "session-review-dependencies", "start": "2026-08-08T14:40:00Z", "end": "2026-08-08T16:15:00Z" },
-    { "session_id": "session-terminal-layout", "start": "2026-08-08T15:30:00Z", "end": "2026-08-08T16:40:00Z" },
-    { "session_id": "session-error-states", "start": "2026-08-08T16:10:00Z", "end": "2026-08-08T16:55:00Z" },
-    { "session_id": "session-filters", "start": "2026-08-08T17:15:00Z", "end": "2026-08-08T18:35:00Z" },
-    { "session_id": "session-release-checks", "start": "2026-08-08T18:00:00Z", "end": "2026-08-08T18:50:00Z" },
-    { "session_id": "session-refresh-regression", "start": "2026-08-08T19:10:00Z", "end": "2026-08-08T20:05:00Z" },
-    { "session_id": "session-readme-demo", "start": "2026-08-08T20:20:00Z", "end": "2026-08-08T21:00:00Z" },
-    { "session_id": "session-ci-summary", "start": "2026-08-08T20:35:00Z", "end": "2026-08-08T21:20:00Z" }
-  ],
+  "sessions_total": 12,
   "pricing": {
     "source": "custom+embedded",
     "table_version": "2026-08-01",

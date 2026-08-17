@@ -332,6 +332,7 @@ fn text_render_keeps_the_selected_session_inside_its_target_viewport() {
         })
         .collect();
     report.totals.sessions = report.by_session.len();
+    report.sessions_total = report.by_session.len();
     let mut app = app_with_report(report, ColorMode::Monochrome);
     app.set_focus(Focus::Sessions);
     app.move_session(29, 30);

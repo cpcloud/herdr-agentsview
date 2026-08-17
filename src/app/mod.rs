@@ -6,12 +6,13 @@ mod filters;
 mod input;
 mod sessions;
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use crate::api::{ApiError, ApiErrorKind};
-use crate::wire::{AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection};
+use crate::api::{ApiError, ApiErrorKind, SessionFetch};
+use crate::wire::{AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection, SessionRow};
 
 pub(crate) use filters::PopupQueryEdit;
 pub use filters::{CompactRegion, FilterPopup, Focus, MetadataKind};
@@ -23,8 +24,16 @@ use sessions::SessionState;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppCommand {
     FetchReport(ReportSelection),
+    FetchSessionPage(SessionPageRequest),
+    CancelSessionPage,
     FetchMetadata(MetadataKind),
     Quit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionPageRequest {
+    pub report_id: String,
+    pub bucket: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,6 +92,10 @@ pub struct App {
     popup: Option<FilterPopup>,
     help_open: bool,
     sessions: SessionState,
+    session_pages_report_id: Option<String>,
+    session_pages: BTreeMap<usize, Vec<SessionRow>>,
+    pending_session_page: Option<SessionPageRequest>,
+    pending_session_id: Option<String>,
     timeline_cursor: usize,
     timeline_inspection_active: bool,
     breakdown_category: BreakdownCategory,
@@ -104,6 +117,10 @@ impl App {
             popup: None,
             help_open: false,
             sessions: SessionState::default(),
+            session_pages_report_id: None,
+            session_pages: BTreeMap::new(),
+            pending_session_page: None,
+            pending_session_id: None,
             timeline_cursor: 0,
             timeline_inspection_active: false,
             breakdown_category: BreakdownCategory::Project,
@@ -144,6 +161,7 @@ impl App {
         self.timeline_cursor = 0;
         self.timeline_inspection_active = false;
         self.sessions.reset_position();
+        self.clear_session_pages();
         self.selection.clone()
     }
 
@@ -168,6 +186,7 @@ impl App {
             report,
             received_at,
         };
+        self.pending_session_page = None;
         Some(self.selection.clone())
     }
 
@@ -210,7 +229,10 @@ impl App {
         match (previous, result) {
             (ReportState::InitialLoading, Ok(report))
             | (ReportState::Refreshing { .. }, Ok(report)) => {
-                if self.timeline_inspection_active && self.timeline_cursor >= report.buckets.len() {
+                if self.timeline_inspection_active
+                    && (self.timeline_cursor >= report.buckets.len()
+                        || !report_supports_timeline_inspection(&report))
+                {
                     self.timeline_inspection_active = false;
                 }
                 let last = report.buckets.len().saturating_sub(1);
@@ -219,11 +241,18 @@ impl App {
                 } else {
                     self.timeline_cursor.min(last)
                 };
+                self.clear_session_pages();
+                self.session_pages_report_id = report.report_id.clone();
                 self.report_state = ReportState::Ready {
                     report,
                     received_at,
                 };
-                self.restore_session_selection(selected_session_id.as_deref());
+                if self.timeline_inspection_active {
+                    self.pending_session_id = selected_session_id;
+                    self.sessions.reset_position();
+                } else {
+                    self.restore_session_selection(selected_session_id.as_deref());
+                }
             }
             (
                 ReportState::Refreshing {
@@ -287,6 +316,11 @@ impl App {
         self.timeline_inspection_active
     }
 
+    pub(crate) fn timeline_inspection_available(&self) -> bool {
+        self.report()
+            .is_some_and(report_supports_timeline_inspection)
+    }
+
     pub(crate) fn inspected_bucket(&self) -> Option<&crate::wire::Bucket> {
         self.timeline_inspection_active
             .then(|| self.report()?.buckets.get(self.timeline_cursor))
@@ -297,13 +331,17 @@ impl App {
         let selected_session_id = self.selected_session_id();
         if self.timeline_inspection_active {
             self.timeline_inspection_active = false;
-        } else if self
-            .report()
-            .is_some_and(|report| !report.buckets.is_empty())
-        {
+        } else if self.timeline_inspection_available() {
             self.timeline_inspection_active = true;
         }
-        self.restore_session_selection_or_first(selected_session_id.as_deref());
+        if self.timeline_inspection_active {
+            self.pending_session_id = selected_session_id;
+            self.sessions.reset_position();
+            self.restore_cached_session_page_selection();
+        } else {
+            self.pending_session_id = None;
+            self.restore_session_selection_or_first(selected_session_id.as_deref());
+        }
     }
 
     pub fn move_timeline(&mut self, delta: isize) {
@@ -314,7 +352,62 @@ impl App {
         } else {
             self.timeline_cursor = 0;
         }
-        self.restore_session_selection_or_first(selected_session_id.as_deref());
+        self.pending_session_id = selected_session_id;
+        self.sessions.reset_position();
+        self.restore_cached_session_page_selection();
+    }
+
+    pub fn session_page_request(&self) -> Option<SessionPageRequest> {
+        let request = self.active_session_page_request()?;
+        let cached = self.session_pages_report_id.as_deref() == Some(request.report_id.as_str())
+            && self.session_pages.contains_key(&request.bucket);
+        (!cached).then_some(request)
+    }
+
+    pub(crate) fn begin_session_page_request(&mut self) -> Option<SessionPageRequest> {
+        let request = self.session_page_request();
+        self.pending_session_page = request.clone();
+        request
+    }
+
+    pub(crate) fn session_page_loading(&self) -> bool {
+        self.pending_session_page
+            .as_ref()
+            .is_some_and(|pending| self.active_session_page_request().as_ref() == Some(pending))
+    }
+
+    pub fn apply_session_page(
+        &mut self,
+        request: &SessionPageRequest,
+        result: Result<SessionFetch, ApiError>,
+        received_at: DateTime<Utc>,
+    ) {
+        if self.active_session_page_request().as_ref() != Some(request) {
+            return;
+        }
+        if self.pending_session_page.as_ref() == Some(request) {
+            self.pending_session_page = None;
+        }
+        match result {
+            Ok(SessionFetch::Rows(rows)) => {
+                self.session_pages_report_id = Some(request.report_id.clone());
+                self.session_pages.insert(request.bucket, rows);
+                let selected = self.pending_session_id.take();
+                self.restore_session_selection_or_first(selected.as_deref());
+            }
+            Ok(SessionFetch::Refreshed(report)) => {
+                self.timeline_inspection_active = false;
+                self.timeline_cursor = report.first_activity_bucket_index();
+                self.clear_session_pages();
+                self.session_pages_report_id = report.report_id.clone();
+                self.report_state = ReportState::Ready {
+                    report,
+                    received_at,
+                };
+                self.restore_session_selection(None);
+            }
+            Err(error) => self.apply_session_page_error(error),
+        }
     }
 
     pub fn breakdown_category(&self) -> BreakdownCategory {
@@ -366,6 +459,55 @@ impl App {
         )
     }
 
+    pub(crate) fn session_rows_for_active_bucket(&self) -> Option<&[SessionRow]> {
+        let request = self.active_session_page_request()?;
+        (self.session_pages_report_id.as_deref() == Some(request.report_id.as_str()))
+            .then(|| self.session_pages.get(&request.bucket))
+            .flatten()
+            .map(Vec::as_slice)
+    }
+
+    fn active_session_page_request(&self) -> Option<SessionPageRequest> {
+        let report = self.report()?;
+        let bucket = self.inspected_bucket()?;
+        if report.bucket_is_future(bucket) {
+            return None;
+        }
+        Some(SessionPageRequest {
+            report_id: report.report_id.clone()?,
+            bucket: self.timeline_cursor,
+        })
+    }
+
+    fn apply_session_page_error(&mut self, error: ApiError) {
+        let previous = std::mem::replace(&mut self.report_state, ReportState::InitialLoading);
+        self.report_state = match previous {
+            ReportState::Ready {
+                report,
+                received_at,
+            } => ReportState::Stale {
+                report,
+                received_at,
+                error,
+            },
+            state => state,
+        };
+    }
+
+    fn clear_session_pages(&mut self) {
+        self.session_pages_report_id = None;
+        self.session_pages.clear();
+        self.pending_session_page = None;
+        self.pending_session_id = None;
+    }
+
+    fn restore_cached_session_page_selection(&mut self) {
+        if self.session_rows_for_active_bucket().is_some() {
+            let selected = self.pending_session_id.take();
+            self.restore_session_selection_or_first(selected.as_deref());
+        }
+    }
+
     pub(crate) fn move_breakdown(&mut self, delta: isize) {
         const CATEGORIES: [BreakdownCategory; 3] = [
             BreakdownCategory::Project,
@@ -379,6 +521,14 @@ impl App {
         let next = (current as isize + delta).rem_euclid(CATEGORIES.len() as isize) as usize;
         self.breakdown_category = CATEGORIES[next];
     }
+}
+
+fn report_supports_timeline_inspection(report: &Report) -> bool {
+    !report.buckets.is_empty()
+        && report
+            .report_id
+            .as_deref()
+            .is_some_and(|report_id| !report_id.is_empty())
 }
 
 impl<T> From<Result<T, ApiError>> for Loadable<T> {

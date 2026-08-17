@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 
 use crate::wire::SessionRow;
 
@@ -127,7 +126,14 @@ impl App {
         let Some(report) = self.report() else {
             return Vec::new();
         };
-        let mut rows: Vec<_> = report.by_session.iter().collect();
+        self.sorted_rows(report.by_session.iter())
+    }
+
+    fn sorted_rows<'a>(
+        &self,
+        rows: impl IntoIterator<Item = &'a SessionRow>,
+    ) -> Vec<&'a SessionRow> {
+        let mut rows: Vec<_> = rows.into_iter().collect();
         rows.sort_by(|left, right| {
             compare_rows(left, right, self.sessions.column, self.sessions.direction)
         });
@@ -135,29 +141,14 @@ impl App {
     }
 
     pub(crate) fn displayed_sessions(&self) -> Vec<&SessionRow> {
-        let mut rows = self.sorted_sessions();
         let (Some(report), Some(bucket)) = (self.report(), self.inspected_bucket()) else {
-            return rows;
+            return self.sorted_sessions();
         };
         if report.bucket_is_future(bucket) {
-            rows.clear();
-            return rows;
+            return Vec::new();
         }
-        let observed_end = report.observed_bucket_end(bucket);
-        let active_sessions = report
-            .intervals
-            .iter()
-            .filter(|interval| {
-                if interval.start == interval.end {
-                    bucket.start <= interval.start && interval.start < observed_end
-                } else {
-                    interval.start < observed_end && interval.end > bucket.start
-                }
-            })
-            .map(|interval| interval.session_id.as_str())
-            .collect::<BTreeSet<_>>();
-        rows.retain(|row| active_sessions.contains(row.session_id.as_str()));
-        rows
+        self.session_rows_for_active_bucket()
+            .map_or_else(Vec::new, |rows| self.sorted_rows(rows.iter()))
     }
 
     pub fn session_cursor(&self) -> usize {

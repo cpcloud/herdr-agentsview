@@ -1,5 +1,6 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
+  "report_id": "fixture-report-id",
   "pricing": {
     "source": "custom+embedded",
     "table_version": "2026-08-01",
@@ -342,16 +343,5 @@
       "is_automated": false
     }
   ],
-  "intervals": [
-    {
-      "session_id": "session-alpha",
-      "start": "2026-08-08T17:00:00Z",
-      "end": "2026-08-08T17:20:00Z"
-    },
-    {
-      "session_id": "session-beta",
-      "start": "2026-08-08T17:05:00Z",
-      "end": "2026-08-08T17:15:00Z"
-    }
-  ]
+  "sessions_total": 3
 }

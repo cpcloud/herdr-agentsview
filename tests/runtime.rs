@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
-use herdr_agentsview::app::{App, InputKey, Loadable, MetadataKind, ReportState};
+use herdr_agentsview::app::{App, Focus, InputKey, Loadable, MetadataKind, ReportState};
 use herdr_agentsview::config::PluginConfig;
 use herdr_agentsview::tui::Runtime;
 use herdr_agentsview::wire::ReportSelection;
@@ -17,7 +17,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-const REPORT: &str = include_str!("fixtures/report-v5.json");
+const REPORT: &str = include_str!("fixtures/report-v6.json");
 const PROJECTS: &str = r#"{"projects":[{"name":"project-alpha","session_count":2}]}"#;
 const AGENTS: &str = r#"{"agents":[{"name":"codex","session_count":2}]}"#;
 const MACHINES: &str = r#"{"machines":["machine-alpha"]}"#;
@@ -25,6 +25,7 @@ const MACHINES: &str = r#"{"machines":["machine-alpha"]}"#;
 #[derive(Clone, Copy)]
 enum Route {
     Report(usize),
+    Sessions,
     Projects(usize),
     Agents,
     Machines,
@@ -138,7 +139,9 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         .expect("request target")
         .to_owned();
     state.requests.lock().unwrap().push(path.clone());
-    let route = if path.starts_with("/api/v1/activity/report") {
+    let route = if path.starts_with("/api/v1/activity/report/") && path.contains("/sessions") {
+        Route::Sessions
+    } else if path.starts_with("/api/v1/activity/report") {
         Route::Report(state.report_count.fetch_add(1, Ordering::SeqCst) + 1)
     } else if path.starts_with("/api/v1/projects") {
         Route::Projects(state.project_count.fetch_add(1, Ordering::SeqCst) + 1)
@@ -171,6 +174,7 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
             "temporarily unavailable".to_owned(),
         ),
         Route::Report(ordinal) => ("200 OK", report_for_path(&path, ordinal)),
+        Route::Sessions => ("200 OK", session_page_for_path(&path)),
         Route::Projects(1) if state.fail_first_projects.load(Ordering::SeqCst) => (
             "503 Service Unavailable",
             "temporarily unavailable".to_owned(),
@@ -192,9 +196,19 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
 fn report_for_path(path: &str, ordinal: usize) -> String {
     let mut report: serde_json::Value = serde_json::from_str(REPORT).unwrap();
     if path.contains("date=2026-08-08") {
-        report["totals"]["sessions"] = serde_json::json!(7 + ordinal);
+        report["totals"]["output_tokens"] = serde_json::json!(7 + ordinal);
     }
     serde_json::to_string(&report).unwrap()
+}
+
+fn session_page_for_path(_path: &str) -> String {
+    let report: serde_json::Value = serde_json::from_str(REPORT).unwrap();
+    serde_json::to_string(&serde_json::json!({
+        "report_id": report["report_id"],
+        "sessions": [report["by_session"][0].clone()],
+        "total": 1
+    }))
+    .unwrap()
 }
 
 fn app(config: &PluginConfig, date: NaiveDate) -> App {
@@ -250,6 +264,42 @@ async fn initial_load_requests_report_and_all_metadata() {
 }
 
 #[tokio::test]
+async fn timeline_inspection_loads_the_exact_v6_bucket_page() {
+    // If the runtime drops the v6 session-page command, timeline inspection stays empty even
+    // though the report itself loaded successfully and no schema mismatch is visible.
+    let server = RecordingServer::start().await;
+    let config = server.config(Duration::from_secs(60));
+    let date = NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
+    let mut app = app(&config, date);
+    let mut runtime = Runtime::new(&config).unwrap();
+    runtime.start(&mut app);
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.report_state(), ReportState::Ready { .. })
+    })
+    .await;
+    app.set_focus(Focus::Timeline);
+
+    let command = app
+        .handle_input(InputKey::Enter, date)
+        .expect("timeline inspection must request its server page");
+    assert!(!runtime.dispatch(command));
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        app.timeline_inspection_active() && app.session_page_request().is_none()
+    })
+    .await;
+
+    let path = server
+        .paths()
+        .into_iter()
+        .find(|path| path.contains("/sessions"))
+        .expect("record v6 session-page request");
+    assert!(path.starts_with("/api/v1/activity/report/fixture-report-id/sessions?"));
+    assert!(path.contains("bucket=0"));
+}
+
+#[tokio::test]
 async fn foreground_load_cancels_the_old_request() {
     // If a superseded request survives, a slow old filter can overwrite the newest report.
     let server = RecordingServer::start().await;
@@ -270,7 +320,7 @@ async fn foreground_load_cancels_the_old_request() {
     wait_until(|| {
         runtime.drain_events(&mut app);
         app.report()
-            .is_some_and(|report| report.totals.sessions == 9)
+            .is_some_and(|report| report.totals.output_tokens == 9)
     })
     .await;
     wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 1).await;
@@ -306,7 +356,7 @@ async fn scheduled_refresh_supersedes_an_unresponsive_report() {
         matches!(app.report_state(), ReportState::Ready { .. })
             && app
                 .report()
-                .is_some_and(|report| report.totals.sessions == 10)
+                .is_some_and(|report| report.totals.output_tokens == 10)
     })
     .await;
     wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 1).await;
@@ -362,7 +412,7 @@ async fn scheduled_refresh_backoff_allows_a_slow_replacement_to_finish() {
         matches!(app.report_state(), ReportState::Ready { .. })
             && app
                 .report()
-                .is_some_and(|report| report.totals.sessions == 10)
+                .is_some_and(|report| report.totals.output_tokens == 10)
     })
     .await;
 }
@@ -389,7 +439,7 @@ async fn scheduled_refresh_supersedes_an_unresponsive_initial_load() {
         matches!(app.report_state(), ReportState::Ready { .. })
             && app
                 .report()
-                .is_some_and(|report| report.totals.sessions == 9)
+                .is_some_and(|report| report.totals.output_tokens == 9)
     })
     .await;
     wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 1).await;
@@ -429,7 +479,7 @@ async fn configured_timeout_owns_recovery_without_scheduled_cancellation() {
         matches!(app.report_state(), ReportState::Ready { .. })
             && app
                 .report()
-                .is_some_and(|report| report.totals.sessions == 9)
+                .is_some_and(|report| report.totals.output_tokens == 9)
     })
     .await;
 }

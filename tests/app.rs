@@ -4,12 +4,12 @@
 
 use std::time::Duration;
 
-use herdr_agentsview::api::{ApiError, ApiErrorKind};
+use herdr_agentsview::api::{ApiError, ApiErrorKind, SessionFetch};
 use herdr_agentsview::app::{
     App, AppCommand, BreakdownCategory, BreakdownValue, Focus, InputKey, Loadable, MetadataKind,
     ReportState, SessionSortColumn, SortDirection,
 };
-use herdr_agentsview::wire::{ProjectInfo, ReportInterval};
+use herdr_agentsview::wire::{ProjectInfo, SessionRow};
 
 #[path = "support/activity.rs"]
 mod activity_support;
@@ -217,10 +217,10 @@ fn partial_and_empty_reports_remain_distinct_ready_states() {
     let mut empty = report();
     empty.totals.sessions = 0;
     empty.by_session.clear();
+    empty.sessions_total = 0;
     empty.by_project.clear();
     empty.by_model.clear();
     empty.by_agent.clear();
-    empty.intervals.clear();
     partial.apply_report(Ok(Box::new(empty)), received_at());
 
     assert!(partial.is_empty());
@@ -425,9 +425,8 @@ fn sliced_session_navigation_clamps_and_scrolls_to_the_sliced_rows() {
     // down can put the selected row beyond the sliced viewport and make its marker vanish.
     let mut value = report();
     let template = value.by_session[0].clone();
-    let bucket = value.buckets[0].clone();
     value.by_session.clear();
-    value.intervals.clear();
+    let mut bucket_rows = Vec::new();
     for index in 0..6 {
         let mut row = template.clone();
         row.session_id = format!("session-{index}");
@@ -435,18 +434,16 @@ fn sliced_session_navigation_clamps_and_scrolls_to_the_sliced_rows() {
         row.agent_minutes = Some((6 - index) as f64);
         value.by_session.push(row);
         if index < 4 {
-            value.intervals.push(ReportInterval {
-                session_id: format!("session-{index}"),
-                start: bucket.start,
-                end: bucket.end,
-            });
+            bucket_rows.push(value.by_session[index].clone());
         }
     }
     value.totals.sessions = value.by_session.len();
+    value.sessions_total = value.by_session.len();
     let mut app = App::new(selection(), Duration::from_secs(300));
     app.begin_foreground_load();
     app.apply_report(Ok(Box::new(value)), received_at());
     app.toggle_timeline_inspection();
+    apply_bucket_rows(&mut app, bucket_rows);
 
     app.move_session(20, 2);
 
@@ -458,29 +455,63 @@ fn sliced_session_navigation_clamps_and_scrolls_to_the_sliced_rows() {
 fn moving_a_slice_preserves_session_identity_or_selects_the_first_survivor() {
     // If a slice move preserves only the raw row offset, the selection can silently jump to
     // an unrelated session or remain beyond the destination bucket's displayed rows.
-    let mut shared = report();
-    shared.intervals[1].end = shared.buckets[1].end;
+    let shared = report();
+    let alpha = session(&shared, "session-alpha");
+    let beta = session(&shared, "session-beta");
     let mut preserving = App::new(selection(), Duration::from_secs(300));
     preserving.begin_foreground_load();
     preserving.apply_report(Ok(Box::new(shared)), received_at());
     preserving.toggle_timeline_inspection();
+    apply_bucket_rows(&mut preserving, vec![alpha.clone(), beta.clone()]);
     preserving.move_session(1, 2);
     assert_eq!(selected_session_id(&preserving), "session-beta");
 
     preserving.move_timeline(1);
+    apply_bucket_rows(&mut preserving, vec![alpha.clone(), beta]);
 
     assert_eq!(preserving.session_cursor(), 1);
     assert_eq!(selected_session_id(&preserving), "session-beta");
 
     let mut falling_back = ready_app();
     falling_back.toggle_timeline_inspection();
+    let initial_rows = vec![
+        session(falling_back.report().unwrap(), "session-alpha"),
+        session(falling_back.report().unwrap(), "session-beta"),
+    ];
+    apply_bucket_rows(&mut falling_back, initial_rows);
     falling_back.move_session(1, 2);
     assert_eq!(selected_session_id(&falling_back), "session-beta");
 
     falling_back.move_timeline(1);
+    apply_bucket_rows(&mut falling_back, vec![alpha]);
 
     assert_eq!(falling_back.session_cursor(), 0);
     assert_eq!(selected_session_id(&falling_back), "session-alpha");
+}
+
+#[test]
+fn revisiting_a_cached_bucket_restores_the_selected_session() {
+    // If a cached destination skips both the request and local selection restoration, moving
+    // back to it silently jumps the cursor to the first row.
+    let value = report();
+    let rows = vec![
+        session(&value, "session-alpha"),
+        session(&value, "session-beta"),
+    ];
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.begin_foreground_load();
+    app.apply_report(Ok(Box::new(value)), received_at());
+    app.toggle_timeline_inspection();
+    apply_bucket_rows(&mut app, rows.clone());
+    app.move_session(1, 2);
+    app.move_timeline(1);
+    apply_bucket_rows(&mut app, rows);
+    assert_eq!(selected_session_id(&app), "session-beta");
+
+    app.move_timeline(-1);
+
+    assert!(app.session_page_request().is_none());
+    assert_eq!(selected_session_id(&app), "session-beta");
 }
 
 #[test]
@@ -502,6 +533,23 @@ fn refresh_that_removes_the_inspected_bucket_exits_session_slicing() {
 }
 
 #[test]
+fn refresh_without_a_page_id_exits_session_slicing() {
+    // If a refreshed fallback report loses report_id but retains the old slice mode, its full
+    // session rows stay hidden behind a bucket page that the server cannot provide.
+    let mut app = ready_app();
+    app.toggle_timeline_inspection();
+    app.begin_refresh().unwrap();
+    let mut replacement = report();
+    replacement.report_id = None;
+
+    app.apply_report(Ok(Box::new(replacement)), received_at());
+
+    assert!(!app.timeline_inspection_active());
+    assert!(app.session_page_request().is_none());
+    assert_eq!(app.sorted_sessions().len(), 3);
+}
+
+#[test]
 fn breakdown_category_and_value_mode_select_server_computed_rows() {
     // If category or value mode mutates the data source, bars can show Project labels with
     // Model values or use cost while claiming agent-minutes.
@@ -515,4 +563,18 @@ fn breakdown_category_and_value_mode_select_server_computed_rows() {
 
     assert_eq!(app.breakdown_value(), BreakdownValue::Cost);
     assert_eq!(app.breakdown_rows()[0].key, "codex");
+}
+
+fn session(report: &herdr_agentsview::wire::Report, id: &str) -> SessionRow {
+    report
+        .by_session
+        .iter()
+        .find(|row| row.session_id == id)
+        .unwrap()
+        .clone()
+}
+
+fn apply_bucket_rows(app: &mut App, rows: Vec<SessionRow>) {
+    let request = app.session_page_request().expect("active bucket request");
+    app.apply_session_page(&request, Ok(SessionFetch::Rows(rows)), received_at());
 }
