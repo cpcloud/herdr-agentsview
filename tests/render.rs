@@ -376,18 +376,19 @@ fn timeline_axis_places_intermediate_clock_ticks() {
 }
 
 #[test]
-fn compact_partial_timeline_names_its_observed_cutoff() {
-    // If compact mode hides the cutoff row, its future pattern has no time boundary and a
-    // partial day is indistinguishable from delayed ingestion.
+fn compact_partial_timeline_marks_its_observed_cutoff() {
+    // If the compact chart drops the cutoff marker, its future pattern has no time boundary
+    // and a partial day is indistinguishable from delayed ingestion.
     let app = stale_partial_app(ColorMode::Monochrome);
 
     let text = render::to_text_at(&app, 80, 24, render_time());
 
-    let axis = text
-        .lines()
-        .find(|line| line.contains("obs 16:30") && line.contains("┄ future"))
+    text.lines()
+        .find(|line| line.contains("16:30│"))
         .unwrap_or_else(|| panic!("missing compact observation cutoff\n{text}"));
-    assert!(axis.contains("00:00"), "{axis}");
+    text.lines()
+        .find(|line| line.matches("00:00").count() == 2)
+        .unwrap_or_else(|| panic!("missing compact timeline axis\n{text}"));
 }
 
 #[test]
@@ -402,7 +403,7 @@ fn partial_timeline_marks_the_future_inside_a_straddling_bucket() {
         .lines()
         .find(|line| line.matches('┄').count() > 1)
         .unwrap_or_else(|| panic!("missing sub-bucket future region\n{text}"));
-    assert_eq!(future_line.matches('┄').count(), 39, "{future_line}");
+    assert_eq!(future_line.matches('┄').count(), 38, "{future_line}");
 }
 
 #[test]
@@ -571,10 +572,7 @@ fn repeated_hour_disambiguates_peak_and_observed_cutoff_clocks() {
     let text = render::to_text_at(&app, 120, 40, render_time());
 
     assert!(text.contains("▲ 2 @ 01:30 EDT"), "{text}");
-    assert!(
-        text.contains("Observed through 01:30 EST · ┄ future"),
-        "{text}"
-    );
+    assert!(text.contains("01:30 EST│"), "{text}");
 }
 
 #[test]
@@ -706,9 +704,9 @@ fn stale_partial_render_distinguishes_observed_zeroes_from_future_buckets() {
     assert!(text.contains("Summary · through 16:30"), "{text}");
     assert!(text.contains("Stale 10m"));
     assert!(text.contains("request timed out"));
-    assert!(text.contains("Observed through 16:30"));
+    assert!(text.contains("16:30│"));
     assert!(text.contains("· observed zero"));
-    assert!(text.contains("┄ future"));
+    assert!(text.contains('┄'));
     assert_width(&text, 120);
 }
 
