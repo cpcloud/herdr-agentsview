@@ -3,8 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 {
-  bash,
-  coreutils,
   herdr,
   lib,
   makeWrapper,
@@ -38,9 +36,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
   ];
 
   nativeBuildInputs = [ makeWrapper ];
-
-  BASH_BIN_PATH = lib.getExe bash;
-  SLEEP_BIN_PATH = lib.getExe' coreutils "sleep";
 
   postInstall = ''
     install -Dm755 \
