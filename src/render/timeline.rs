@@ -77,8 +77,7 @@ pub(super) fn render(
     };
     Paragraph::new(legend).render(Rect::new(inner.x, inner.y, inner.width, 1), buffer);
 
-    let separate_cutoff = report.partial && class != LayoutClass::Compact;
-    let reserved = 2 + u16::from(separate_cutoff);
+    let reserved = 2;
     let chart_height = inner.height.saturating_sub(reserved).max(1);
     let chart = Rect::new(inner.x, inner.y + 1, inner.width, chart_height);
     render_chart(buffer, chart, app, palette);
@@ -89,45 +88,9 @@ pub(super) fn render(
         Paragraph::new(Line::from(Span::styled(axis, palette.muted())))
             .render(Rect::new(inner.x, axis_y, inner.width, 1), buffer);
     }
-    if separate_cutoff {
-        let cutoff_y = axis_y + 1;
-        if cutoff_y < inner.y + inner.height {
-            let as_of = report.as_of.map_or_else(
-                || "unknown".to_owned(),
-                |value| format_clock(value, report.timezone),
-            );
-            let label = format!(
-                "Observed through {} · as of {as_of} · ┄ future",
-                format_clock(report.effective_end, report.timezone)
-            );
-            Paragraph::new(Line::from(Span::styled(
-                clip_with_ellipsis(&label, usize::from(inner.width)),
-                palette.muted(),
-            )))
-            .render(Rect::new(inner.x, cutoff_y, inner.width, 1), buffer);
-        }
-    }
 }
 
 fn timeline_axis(report: &Report, class: LayoutClass, width: usize) -> String {
-    if report.partial && class == LayoutClass::Compact {
-        let as_of = report.as_of.map_or_else(
-            || "?".to_owned(),
-            |value| format_clock(value, report.timezone),
-        );
-        return place_labels(
-            &[
-                format_clock(report.range_start, report.timezone),
-                format!(
-                    "obs {} · as-of {as_of} · ┄ future",
-                    format_clock(report.effective_end, report.timezone)
-                ),
-                format_clock(report.range_end, report.timezone),
-            ],
-            width,
-        );
-    }
-
     let tick_count: i64 = if class == LayoutClass::Compact { 3 } else { 5 };
     let duration = report.range_end.signed_duration_since(report.range_start);
     let seconds = duration.num_seconds();
@@ -264,6 +227,38 @@ fn render_chart(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) {
             cell.set_style(palette.timeline_cursor(cell.style()));
         }
     }
+    render_cutoff_marker(buffer, area, report, palette);
+}
+
+fn render_cutoff_marker(buffer: &mut Buffer, area: Rect, report: &Report, palette: Palette) {
+    if !report.partial || area.width == 0 || area.height == 0 {
+        return;
+    }
+    let width = usize::from(area.width);
+    let column = observed_columns(report, width).min(width - 1);
+    let x = area.x + u16::try_from(column).expect("timeline column fits inside its area");
+    for y in area.y + 1..area.y + area.height {
+        buffer[(x, y)].set_symbol("│").set_style(palette.focus());
+    }
+
+    let clock = format_clock(report.effective_end, report.timezone);
+    let label = clip_with_ellipsis(&clock, width);
+    let label_width = UnicodeWidthStr::width(label.as_str());
+    if label_width == 0 {
+        return;
+    }
+    let label_start = column
+        .saturating_sub(label_width / 2)
+        .min(width - label_width);
+    Paragraph::new(Line::from(Span::styled(label, palette.focus()))).render(
+        Rect::new(
+            area.x + u16::try_from(label_start).expect("timeline label fits inside its area"),
+            area.y,
+            u16::try_from(label_width).expect("timeline label fits inside its area"),
+            1,
+        ),
+        buffer,
+    );
 }
 
 fn bucket_column_range(
@@ -535,6 +530,34 @@ mod tests {
 
         assert_eq!(buffer[(0, 0)].symbol(), "·");
         assert_eq!(buffer[(1, 0)].symbol(), "█");
+    }
+
+    #[test]
+    fn partial_chart_centers_its_effective_end_above_the_cutoff_marker() {
+        // If the timestamp sits beside the marker, the boundary is harder to associate with
+        // its time and the marker no longer reads as a single chart annotation.
+        let mut report = fixture_report();
+        report.timezone = UTC;
+        report.range_start = "2026-08-08T00:00:00Z".parse().unwrap();
+        report.range_end = "2026-08-08T01:00:00Z".parse().unwrap();
+        report.effective_end = "2026-08-08T00:30:00Z".parse().unwrap();
+        let selection = ReportSelection::new(NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(), UTC);
+        let mut app = App::new(selection, Duration::from_secs(300));
+        app.begin_foreground_load();
+        app.apply_report(
+            Ok(Box::new(report)),
+            "2026-08-08T00:31:00Z".parse().unwrap(),
+        );
+        let area = Rect::new(0, 0, 20, 4);
+        let mut buffer = Buffer::empty(area);
+
+        render_chart(&mut buffer, area, &app, Palette::new(ColorMode::Monochrome));
+
+        let centered_label = (8..13).map(|x| buffer[(x, 0)].symbol()).collect::<String>();
+        assert_eq!(centered_label, "00:30");
+        for y in 1..area.height {
+            assert_eq!(buffer[(10, y)].symbol(), "│");
+        }
     }
 
     #[test]
