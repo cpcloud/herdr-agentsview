@@ -68,6 +68,7 @@ impl FramePlan {
         let timeline_height = match class {
             LayoutClass::Wide => 9,
             LayoutClass::Medium => 7,
+            LayoutClass::Compact if app.report().is_some_and(|report| report.partial) => 6,
             LayoutClass::Compact => 5,
             LayoutClass::TooSmall => unreachable!(),
         };

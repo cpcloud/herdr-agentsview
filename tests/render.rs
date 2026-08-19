@@ -377,15 +377,26 @@ fn timeline_axis_places_intermediate_clock_ticks() {
 
 #[test]
 fn compact_partial_timeline_marks_its_observed_cutoff() {
-    // If the compact chart drops the cutoff marker, its future pattern has no time boundary
-    // and a partial day is indistinguishable from delayed ingestion.
+    // If the compact chart has only one plot row, the timestamp replaces the cutoff bar
+    // instead of labeling it from above.
     let app = stale_partial_app(ColorMode::Monochrome);
 
     let text = render::to_text_at(&app, 80, 24, render_time());
 
-    text.lines()
-        .find(|line| line.contains("16:30│"))
-        .unwrap_or_else(|| panic!("missing compact observation cutoff\n{text}"));
+    let lines = text.lines().collect::<Vec<_>>();
+    let label_row = lines
+        .iter()
+        .rposition(|line| line.contains("16:30"))
+        .unwrap_or_else(|| panic!("missing compact observation cutoff time\n{text}"));
+    let marker_column = lines[label_row]
+        .chars()
+        .position(|character| character == ':')
+        .expect("cutoff time has a center character");
+    assert_eq!(
+        lines[label_row + 1].chars().nth(marker_column),
+        Some('│'),
+        "cutoff marker is not centered below its time\n{text}"
+    );
     text.lines()
         .find(|line| line.matches("00:00").count() == 2)
         .unwrap_or_else(|| panic!("missing compact timeline axis\n{text}"));
@@ -704,7 +715,6 @@ fn stale_partial_render_distinguishes_observed_zeroes_from_future_buckets() {
     assert!(text.contains("Summary · through 16:30"), "{text}");
     assert!(text.contains("Stale 10m"));
     assert!(text.contains("request timed out"));
-    assert!(text.contains("16:30│"));
     assert!(text.contains("· observed zero"));
     assert!(text.contains('┄'));
     assert_width(&text, 120);

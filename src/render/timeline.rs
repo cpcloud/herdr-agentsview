@@ -237,27 +237,19 @@ fn render_cutoff_marker(buffer: &mut Buffer, area: Rect, report: &Report, palett
     let width = usize::from(area.width);
     let column = observed_columns(report, width).min(width - 1);
     let x = area.x + u16::try_from(column).expect("timeline column fits inside its area");
-    for y in area.y..area.y + area.height {
+    for y in area.y + 1..area.y + area.height {
         buffer[(x, y)].set_symbol("│").set_style(palette.focus());
     }
 
     let clock = format_clock(report.effective_end, report.timezone);
-    let clock_width = UnicodeWidthStr::width(clock.as_str());
-    let left_width = column;
-    let right_width = width - column - 1;
-    let use_left =
-        clock_width <= left_width || (clock_width > right_width && left_width >= right_width);
-    let available_width = if use_left { left_width } else { right_width };
-    let label = clip_with_ellipsis(&clock, available_width);
+    let label = clip_with_ellipsis(&clock, width);
     let label_width = UnicodeWidthStr::width(label.as_str());
-    let label_start = if use_left {
-        column - label_width
-    } else {
-        column + 1
-    };
     if label_width == 0 {
         return;
     }
+    let label_start = column
+        .saturating_sub(label_width / 2)
+        .min(width - label_width);
     Paragraph::new(Line::from(Span::styled(label, palette.focus()))).render(
         Rect::new(
             area.x + u16::try_from(label_start).expect("timeline label fits inside its area"),
@@ -541,9 +533,9 @@ mod tests {
     }
 
     #[test]
-    fn partial_chart_marks_its_effective_end_inside_the_plot() {
-        // If the cutoff marker is fixed or derived from the wrong timestamp, it no longer
-        // separates observed data from the future region when the report advances.
+    fn partial_chart_centers_its_effective_end_above_the_cutoff_marker() {
+        // If the timestamp sits beside the marker, the boundary is harder to associate with
+        // its time and the marker no longer reads as a single chart annotation.
         let mut report = fixture_report();
         report.timezone = UTC;
         report.range_start = "2026-08-08T00:00:00Z".parse().unwrap();
@@ -561,11 +553,9 @@ mod tests {
 
         render_chart(&mut buffer, area, &app, Palette::new(ColorMode::Monochrome));
 
-        let label = (0..area.width)
-            .map(|x| buffer[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(label.contains("00:30"), "{label:?}");
-        for y in 0..area.height {
+        let centered_label = (8..13).map(|x| buffer[(x, 0)].symbol()).collect::<String>();
+        assert_eq!(centered_label, "00:30");
+        for y in 1..area.height {
             assert_eq!(buffer[(10, y)].symbol(), "│");
         }
     }
