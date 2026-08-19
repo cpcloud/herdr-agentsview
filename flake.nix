@@ -6,6 +6,10 @@
   description = "AgentsView activity, compressed into one very busy terminal.";
 
   inputs = {
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -14,14 +18,21 @@
       url = "github:ogulcancelik/herdr/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.fenix.follows = "fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs =
     {
       self,
+      fenix,
       git-hooks,
       herdr,
+      naersk,
       nixpkgs,
     }:
     let
@@ -35,11 +46,22 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          rustToolchain = fenix.packages.${system}.stable.withComponents [
+            "cargo"
+            "clippy"
+            "rustc"
+            "rustfmt"
+          ];
+          naerskLib = naersk.lib.${system}.override {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+          };
           package = pkgs.callPackage ./nix/package.nix {
             herdr = herdr.packages.${system}.default;
+            inherit naerskLib;
           };
           hooks = import ./nix/hooks.nix {
-            inherit git-hooks pkgs;
+            inherit git-hooks pkgs rustToolchain;
             src = self;
           };
           mkDemo = pkgs.callPackage ./nix/demo.nix { };
@@ -56,6 +78,7 @@
             hooks
             package
             pkgs
+            rustToolchain
             ;
         };
     in
@@ -98,11 +121,8 @@
           default = outputs.pkgs.mkShell {
             inputsFrom = [ outputs.package ];
             packages = outputs.hooks.enabledPackages ++ [
-              outputs.pkgs.cargo
-              outputs.pkgs.clippy
               outputs.pkgs.prek
-              outputs.pkgs.rustc
-              outputs.pkgs.rustfmt
+              outputs.rustToolchain
               outputs.pkgs.vhs
             ];
             shellHook = outputs.hooks.shellHook;
