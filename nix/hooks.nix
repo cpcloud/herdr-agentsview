@@ -5,6 +5,7 @@
 {
   git-hooks,
   pkgs,
+  rustToolchain,
   src,
 }:
 git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
@@ -38,7 +39,8 @@ git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
     clippy = {
       enable = true;
       packageOverrides = {
-        inherit (pkgs) cargo clippy;
+        cargo = rustToolchain;
+        clippy = rustToolchain;
       };
       settings = {
         denyWarnings = true;
@@ -55,7 +57,8 @@ git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
     rustfmt = {
       enable = true;
       packageOverrides = {
-        inherit (pkgs) cargo rustfmt;
+        cargo = rustToolchain;
+        rustfmt = rustToolchain;
       };
       settings = {
         check = true;
