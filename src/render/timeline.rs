@@ -92,12 +92,8 @@ pub(super) fn render(
     if separate_cutoff {
         let cutoff_y = axis_y + 1;
         if cutoff_y < inner.y + inner.height {
-            let as_of = report.as_of.map_or_else(
-                || "unknown".to_owned(),
-                |value| format_clock(value, report.timezone),
-            );
             let label = format!(
-                "Observed through {} · as of {as_of} · ┄ future",
+                "Observed through {} · ┄ future",
                 format_clock(report.effective_end, report.timezone)
             );
             Paragraph::new(Line::from(Span::styled(
@@ -111,15 +107,11 @@ pub(super) fn render(
 
 fn timeline_axis(report: &Report, class: LayoutClass, width: usize) -> String {
     if report.partial && class == LayoutClass::Compact {
-        let as_of = report.as_of.map_or_else(
-            || "?".to_owned(),
-            |value| format_clock(value, report.timezone),
-        );
         return place_labels(
             &[
                 format_clock(report.range_start, report.timezone),
                 format!(
-                    "obs {} · as-of {as_of} · ┄ future",
+                    "obs {} · ┄ future",
                     format_clock(report.effective_end, report.timezone)
                 ),
                 format_clock(report.range_end, report.timezone),

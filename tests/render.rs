@@ -385,9 +385,7 @@ fn compact_partial_timeline_names_its_observed_cutoff() {
 
     let axis = text
         .lines()
-        .find(|line| {
-            line.contains("obs 16:30") && line.contains("as-of 16:30") && line.contains("┄ future")
-        })
+        .find(|line| line.contains("obs 16:30") && line.contains("┄ future"))
         .unwrap_or_else(|| panic!("missing compact observation cutoff\n{text}"));
     assert!(axis.contains("00:00"), "{axis}");
 }
@@ -559,7 +557,7 @@ fn focused_timeline_disambiguates_intervals_inside_a_repeated_hour() {
 }
 
 #[test]
-fn repeated_hour_disambiguates_peak_and_partial_cutoff_clocks() {
+fn repeated_hour_disambiguates_peak_and_observed_cutoff_clocks() {
     // If standalone clocks omit their zone during a repeated hour, peak and cutoff facts can
     // display the same local time while referring to different UTC instants.
     let mut report = activity::report();
@@ -574,7 +572,7 @@ fn repeated_hour_disambiguates_peak_and_partial_cutoff_clocks() {
 
     assert!(text.contains("▲ 2 @ 01:30 EDT"), "{text}");
     assert!(
-        text.contains("Observed through 01:30 EST · as of 01:30 EDT"),
+        text.contains("Observed through 01:30 EST · ┄ future"),
         "{text}"
     );
 }
@@ -709,7 +707,6 @@ fn stale_partial_render_distinguishes_observed_zeroes_from_future_buckets() {
     assert!(text.contains("Stale 10m"));
     assert!(text.contains("request timed out"));
     assert!(text.contains("Observed through 16:30"));
-    assert!(text.contains("as of 16:30"));
     assert!(text.contains("· observed zero"));
     assert!(text.contains("┄ future"));
     assert_width(&text, 120);
