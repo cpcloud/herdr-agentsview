@@ -21,9 +21,9 @@ struct FakeHerdr {
 impl FakeHerdr {
     fn new() -> Self {
         let root = tempfile::tempdir().expect("create fake Herdr directory");
-        let executable = root
-            .path()
-            .join(format!("fake-herdr{}", std::env::consts::EXE_SUFFIX));
+        let binary_dir = root.path().join("bin");
+        fs::create_dir(&binary_dir).expect("create fake Herdr binary directory");
+        let executable = binary_dir.join(format!("fake-herdr{}", std::env::consts::EXE_SUFFIX));
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/bin/fake-herdr.rs");
         let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
         let output = Command::new(compiler)
@@ -121,11 +121,7 @@ fn open_targets_the_invoking_pane_without_writing_plugin_state() {
         .map(|entry| entry.expect("read fake Herdr directory entry").file_name())
         .collect::<Vec<_>>();
     assert_eq!(created_names.len(), 2);
-    let executable_name = fake
-        .executable
-        .file_name()
-        .expect("fake Herdr executable name");
-    assert!(created_names.iter().any(|name| name == executable_name));
+    assert!(created_names.iter().any(|name| name == "bin"));
     assert!(created_names.iter().any(|name| name == "calls"));
 }
 
@@ -151,7 +147,11 @@ fn open_times_out_and_terminates_a_hung_herdr_process() {
 
     assert!(!output.status.success());
     assert!(started_at.elapsed() < Duration::from_secs(5));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("timed out after 3 seconds"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("timed out after 3 seconds"),
+        "unexpected Activity open error: {stderr}"
+    );
     let endpoint = fake.hang_endpoint();
     let deadline = Instant::now() + Duration::from_secs(1);
     while endpoint_accepts_connections(endpoint) && Instant::now() < deadline {
