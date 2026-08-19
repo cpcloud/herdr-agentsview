@@ -3,13 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeMap;
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, SystemTime};
 
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use secrecy::SecretString;
-use tokio::net::TcpListener;
 use url::Url;
 
 use crate::config::PluginConfig;
@@ -354,18 +352,20 @@ async fn delayed_response_has_no_deadline_without_a_configured_timeout() {
 }
 
 #[tokio::test]
-async fn connect_failure_is_classified_as_network() {
+async fn tls_connection_failure_is_classified_as_network() {
     // If connection failures are mislabeled as protocol errors, retry and stale-data
     // guidance cannot distinguish transport recovery from an incompatible server.
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    let base_url = Url::parse(&format!(
-        "http://{}/",
-        SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
+    let (server, _) = RecordingServer::start_tls(
+        ResponsePlan::json(REPORT_FIXTURE),
+        SecretString::from("expected bearer"),
+    )
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
     ))
     .unwrap();
-    let client = ActivityClient::new(&config(base_url, None, Duration::from_secs(1))).unwrap();
 
     let error = client.fetch_report(&selection()).await.unwrap_err();
 
