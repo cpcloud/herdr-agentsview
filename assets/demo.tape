@@ -11,10 +11,10 @@ Set Width 2060
 Set Height 1200
 Set TypingSpeed 20ms
 
-Type "nix run .#demo"
+Type "env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor nix run .#demo"
 Enter
 Wait+Screen /Updated [0-9]+s ago/
-Wait+Screen /Peak [1-9]/
+Wait+Screen /▲ [1-9]/
 Sleep 250ms
 Screenshot assets/dashboard.png
 Sleep 1s

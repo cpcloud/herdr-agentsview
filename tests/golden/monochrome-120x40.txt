@@ -1,9 +1,8 @@
 AgentsView                                                                                               Updated 12s ago
 Date 2026-08-08 · Project All · Agent All · Machine All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│Concurrent agents     │ Time             │ Work               │ Sessions                             │ Scope          │
-│Peak 7 @ 06:00        │ Active 25m       │ 30 agent-min       │ 3 total                              │ 3 projects     │
-│                      │ Idle 5m          │ $6.50 cost         │ 2 int · 1 auto · 1 untimed           │ 3 models       │
+│Agents                │ Time             │ Work               │ Sessions                             │ Projects       │
+│▲ 7 @ 06:00           │ ● 25m  ○ 5m      │ ◷ 30 / $6.50       │ 3 = 2 int + 1 auto · 1 unt           │ 3 · 3 models   │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ Concurrent agents ───────────────────────────────────────────────────────────────────────────────────────────────────┐
 │I Interactive  A Automated  · observed zero                                                                           │
@@ -17,6 +16,7 @@ Date 2026-08-08 · Project All · Agent All · Machine All · Session All
 │  Implement activity view model-alpha          project-alpha        codex          20      $3.00     13:00–13:20      │
 │  Review activity view    model-beta           project-beta         reviewer       10      $2.00     13:05–13:15      │
 │  Imported activity       model-gamma          project-gamma        codex          untimed $1.50     untimed          │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

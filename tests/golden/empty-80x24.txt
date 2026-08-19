@@ -1,9 +1,9 @@
 AgentsView                                                       Updated 12s ago
 Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────┐
-│Concurrent agents  Peak 0 @ —  │  Time  Active 0m · Idle 24h                  │
-│Work  0 agent-min · $0.00 cost  │  Scope  0 projects · 0 models               │
-│Sessions  0 total · 0 int · 0 auto · 0 untimed                                │
+│Agents  ▲ 0 @ —                       │ Time  ● 0m  ○ 24h                     │
+│Work  ◷ 0 / $0.00                     │ Projects  0 · 0 models                │
+│Sessions  0 = 0 int + 0 auto · 0 unt                                          │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Concurrent agents ───────────────────────────────────────────────────────────┐
 │I Interactive  A Automated  · observed zero                                   │

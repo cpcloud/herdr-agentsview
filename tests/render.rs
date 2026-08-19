@@ -30,14 +30,12 @@ fn wide_ready_render_preserves_the_complete_operations_stack() {
     assert_golden("golden/ready-200x50.txt", &text);
     let lowercase = text.to_lowercase();
     for label in [
-        "Peak",
-        "Active",
-        "Idle",
-        "Agent-min",
+        "Agents",
+        "Time",
+        "Work",
         "Sessions",
         "Projects",
         "Models",
-        "Cost",
         "Interactive",
         "Automated",
         "Untimed",
@@ -79,9 +77,14 @@ fn compact_ready_render_keeps_overview_and_switchable_data_region() {
 
     assert_golden("golden/ready-80x24.txt", &text);
     for label in [
-        "Peak",
-        "Active",
-        "Idle",
+        "Agents",
+        "Time",
+        "Work",
+        "Projects",
+        "▲",
+        "●",
+        "○",
+        "◷",
         "Concurrent agents",
         "Sessions",
         "Sections",
@@ -172,7 +175,7 @@ fn compact_summary_keeps_semantic_groups_under_large_values() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    for label in ["Concurrent agents", "Time", "Work", "Sessions", "Scope"] {
+    for label in ["Agents", "Time", "Work", "Sessions", "Projects"] {
         assert!(summary.contains(label), "missing {label:?}\n{summary}");
     }
 }
@@ -195,7 +198,7 @@ fn compact_summary_leads_the_session_group_with_its_total() {
         .expect("compact summary has a Sessions row");
 
     assert!(
-        sessions_row.contains("Sessions  18,446,744,073,709,551,615 total"),
+        sessions_row.contains("Sessions  18,446,744,073,709,551,615 ="),
         "{sessions_row}"
     );
 }
@@ -203,28 +206,28 @@ fn compact_summary_leads_the_session_group_with_its_total() {
 #[test]
 fn medium_summary_groups_each_metric_family_into_a_column() {
     // If summary values are spread independently, dividers create a grid without giving
-    // concurrent agents, time, work, sessions, and scope a coherent relationship.
+    // agents, time, work, sessions, and projects a coherent relationship.
     let app = ready_app(ColorMode::Monochrome);
     let text = render::to_text_at(&app, 120, 40, render_time());
     let summary = text
         .lines()
         .skip_while(|line| !line.contains("┌ Summary"))
         .skip(1)
-        .take(3)
+        .take(2)
         .collect::<Vec<_>>();
 
-    for label in ["Concurrent agents", "Time", "Work", "Sessions", "Scope"] {
+    for label in ["Agents", "Time", "Work", "Sessions", "Projects"] {
         assert!(summary[0].contains(label), "missing {label:?}\n{text}");
     }
-    assert!(summary[1].contains("Peak 7 @"), "{text}");
-    assert!(summary[1].contains("Active"), "{text}");
-    assert!(summary[1].contains("agent-min"), "{text}");
-    assert!(summary[1].contains("total"), "{text}");
-    assert!(summary[1].contains("projects"), "{text}");
-    assert!(summary[2].contains("Idle"), "{text}");
-    assert!(summary[2].contains("cost"), "{text}");
-    assert!(summary[2].contains("int"), "{text}");
-    assert!(summary[2].contains("models"), "{text}");
+    assert!(summary[1].contains("▲ 7 @"), "{text}");
+    assert!(summary[1].contains("● 25m"), "{text}");
+    assert!(summary[1].contains("○ 5m"), "{text}");
+    assert!(summary[1].contains("◷ 30 / $6.50"), "{text}");
+    assert!(summary[1].contains("3 ="), "{text}");
+    assert!(summary[1].contains("int"), "{text}");
+    assert!(summary[1].contains("auto"), "{text}");
+    assert!(summary[1].contains("unt"), "{text}");
+    assert!(summary[1].contains("3 · 3 models"), "{text}");
 }
 
 #[test]
@@ -569,7 +572,7 @@ fn repeated_hour_disambiguates_peak_and_partial_cutoff_clocks() {
 
     let text = render::to_text_at(&app, 120, 40, render_time());
 
-    assert!(text.contains("Peak 2 @ 01:30 EDT"), "{text}");
+    assert!(text.contains("▲ 2 @ 01:30 EDT"), "{text}");
     assert!(
         text.contains("Observed through 01:30 EST · as of 01:30 EDT"),
         "{text}"
@@ -593,11 +596,11 @@ fn loading_error_and_empty_states_never_render_invented_activity() {
     assert_golden("golden/auth-error-80x24.txt", &auth);
     assert_golden("golden/empty-80x24.txt", &empty);
     assert!(loading.starts_with("AgentsView ⠖"), "{loading}");
-    assert!(!loading.contains("Peak 0"));
+    assert!(!loading.contains("▲ 0"));
     assert!(!loading.contains("Sessions (0 total)"));
     assert!(auth.contains("Authentication required"));
     assert!(auth.contains("runtime token"));
-    assert!(!auth.contains("Peak 0"));
+    assert!(!auth.contains("▲ 0"));
     assert!(!auth.contains("Sessions (0 total)"));
     assert!(empty.contains("No activity"));
     assert!(empty.contains("move date or clear filters"));
@@ -630,7 +633,7 @@ fn refreshing_keeps_last_good_data_visible_with_freshness() {
     assert!(text.starts_with("AgentsView "), "{text}");
     assert!(text.lines().next().unwrap().contains("Last update 12s ago"));
     assert!(text.contains("Implement activity view"));
-    assert!(text.contains("Peak 7"));
+    assert!(text.contains("▲ 7"));
 }
 
 #[test]
@@ -673,7 +676,7 @@ fn failure_kinds_render_distinct_recovery_copy_without_fake_totals() {
         let app = failed_app(kind, message, ColorMode::Monochrome);
         let text = render::to_text_at(&app, 80, 24, render_time());
         assert!(text.contains(expected), "missing {expected:?}\n{text}");
-        assert!(!text.contains("Peak 0"), "{text}");
+        assert!(!text.contains("▲ 0"), "{text}");
     }
 }
 

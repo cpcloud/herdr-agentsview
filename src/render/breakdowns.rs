@@ -13,7 +13,7 @@ use crate::wire::KeyMinutes;
 use super::layout::LayoutClass;
 use super::status;
 use super::style::{clip_with_ellipsis, pad_right, Palette};
-use super::summary::{format_count, format_usd};
+use super::summary::{format_compact_count, format_usd};
 
 pub(super) fn render(
     buffer: &mut Buffer,
@@ -203,30 +203,9 @@ fn breakdown_value_width(rows: &[KeyMinutes], value: BreakdownValue) -> usize {
 
 fn breakdown_value_label(row: &KeyMinutes, value: BreakdownValue) -> String {
     match value {
-        BreakdownValue::AgentMinutes => format_breakdown_minutes(row.agent_minutes),
+        BreakdownValue::AgentMinutes => format_compact_count(row.agent_minutes),
         BreakdownValue::Cost => format_usd(row.cost),
     }
-}
-
-fn format_breakdown_minutes(value: f64) -> String {
-    if value.round().abs() < 1_000.0 {
-        return format_count(value.round() as i128);
-    }
-
-    const SUFFIXES: [&str; 6] = ["", "k", "M", "B", "T", "P"];
-    let mut scaled = value;
-    let mut suffix = 0;
-    while scaled.round().abs() >= 1_000.0 && suffix + 1 < SUFFIXES.len() {
-        scaled /= 1_000.0;
-        suffix += 1;
-    }
-
-    let mut rounded = (scaled * 10.0).round() / 10.0;
-    if rounded.abs() >= 1_000.0 && suffix + 1 < SUFFIXES.len() {
-        rounded /= 1_000.0;
-        suffix += 1;
-    }
-    format!("{rounded:.1}{}", SUFFIXES[suffix])
 }
 
 fn metric(row: &KeyMinutes, value: BreakdownValue) -> (f64, f64, f64) {
