@@ -18,8 +18,8 @@ use url::Url;
 
 use crate::config::{validate_base_url, PluginConfig};
 use crate::wire::{
-    AgentInfo, AgentsResponse, MachinesResponse, ProjectInfo, ProjectsResponse, Report,
-    ReportSelection, SessionPage, SessionRow, ACTIVITY_SCHEMA_VERSION,
+    AgentInfo, AgentsResponse, BranchInfo, BranchesResponse, MachinesResponse, ProjectInfo,
+    ProjectsResponse, Report, ReportSelection, SessionPage, SessionRow, ACTIVITY_SCHEMA_VERSION,
 };
 
 const ERROR_EXCERPT_CHARS: usize = 160;
@@ -142,6 +142,13 @@ impl ActivityClient {
         serde_json::from_slice::<MachinesResponse>(&body)
             .map(MachinesResponse::into_machines)
             .map_err(|_| ApiError::protocol("AgentsView returned invalid machines metadata"))
+    }
+
+    pub async fn fetch_branches(&self) -> Result<Vec<BranchInfo>, ApiError> {
+        let body = self.get("api/v1/branches", &metadata_query()).await?;
+        serde_json::from_slice::<BranchesResponse>(&body)
+            .map(BranchesResponse::into_branches)
+            .map_err(|_| ApiError::protocol("AgentsView returned invalid branches metadata"))
     }
 
     async fn get(&self, path: &str, query: &[(&'static str, String)]) -> Result<Vec<u8>, ApiError> {

@@ -1,5 +1,5 @@
 AgentsView ⠖
-Date 2026-08-08 · Proj … · Agent … · Host … · Session All
+Date 2026-08-08 · Proj … · Br … · Agent … · Host … · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────┐
 │                                                                              │
 │                                                                              │

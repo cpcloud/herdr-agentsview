@@ -41,6 +41,7 @@ pub struct ReportSelection {
     pub date: NaiveDate,
     pub timezone: Tz,
     pub project: Option<String>,
+    pub git_branch: Option<String>,
     pub agent: Option<String>,
     pub machine: Option<String>,
     pub automation: Automation,
@@ -52,6 +53,7 @@ impl ReportSelection {
             date,
             timezone,
             project: None,
+            git_branch: None,
             agent: None,
             machine: None,
             automation: Automation::All,
@@ -65,6 +67,11 @@ impl ReportSelection {
 
     pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
         self.agent = Some(agent.into());
+        self
+    }
+
+    pub fn with_git_branch(mut self, git_branch: impl Into<String>) -> Self {
+        self.git_branch = Some(git_branch.into());
         self
     }
 
@@ -86,6 +93,9 @@ impl ReportSelection {
         ];
         if let Some(project) = &self.project {
             pairs.push(("project", project.clone()));
+        }
+        if let Some(git_branch) = &self.git_branch {
+            pairs.push(("git_branch", git_branch.clone()));
         }
         if let Some(agent) = &self.agent {
             pairs.push(("agent", agent.clone()));
@@ -381,6 +391,14 @@ pub struct ProjectInfo {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct BranchInfo {
+    pub project: String,
+    pub branch: String,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentInfo {
     pub name: String,
     pub session_count: usize,
@@ -395,6 +413,18 @@ pub struct ProjectsResponse {
 impl ProjectsResponse {
     pub fn into_projects(self) -> Vec<ProjectInfo> {
         self.projects.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BranchesResponse {
+    branches: Option<Vec<BranchInfo>>,
+}
+
+impl BranchesResponse {
+    pub fn into_branches(self) -> Vec<BranchInfo> {
+        self.branches.unwrap_or_default()
     }
 }
 

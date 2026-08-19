@@ -14,7 +14,9 @@ use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use clap::Parser;
-use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report, SessionRow};
+use herdr_agentsview::wire::{
+    AgentInfo, BranchInfo, Bucket, Money, ProjectInfo, Report, SessionRow,
+};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -69,6 +71,11 @@ struct SessionPageBody {
     sessions: Vec<SessionRow>,
     next_cursor: Option<String>,
     total: usize,
+}
+
+#[derive(Serialize)]
+struct BranchesBody {
+    branches: Vec<BranchInfo>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,6 +195,10 @@ async fn serve(
                 machines: vec!["machine-alpha".to_owned(), "machine-beta".to_owned()],
             })
             .context("encode fake machine metadata")?,
+        ),
+        "/api/v1/branches" => (
+            "200 OK",
+            serde_json::to_string(&branch_metadata()).context("encode fake branch metadata")?,
         ),
         _ => ("404 Not Found", r#"{"error":"route not found"}"#.to_owned()),
     };
@@ -510,6 +521,23 @@ fn agent_metadata() -> AgentsBody {
             AgentInfo {
                 name: "reviewer".to_owned(),
                 session_count: 1,
+            },
+        ],
+    }
+}
+
+fn branch_metadata() -> BranchesBody {
+    BranchesBody {
+        branches: vec![
+            BranchInfo {
+                project: "project-alpha".to_owned(),
+                branch: "main".to_owned(),
+                token: "opaque-project-alpha-main".to_owned(),
+            },
+            BranchInfo {
+                project: "project-beta".to_owned(),
+                branch: "main".to_owned(),
+                token: "opaque-project-beta-main".to_owned(),
             },
         ],
     }

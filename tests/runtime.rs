@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use chrono::NaiveDate;
 use herdr_agentsview::app::{App, Focus, InputKey, Loadable, MetadataKind, ReportState};
 use herdr_agentsview::config::PluginConfig;
-use herdr_agentsview::tui::Runtime;
+use herdr_agentsview::tui::{Runtime, SourceContext};
 use herdr_agentsview::wire::ReportSelection;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -21,6 +21,7 @@ const REPORT: &str = include_str!("fixtures/report-v6.json");
 const PROJECTS: &str = r#"{"projects":[{"name":"project-alpha","session_count":2}]}"#;
 const AGENTS: &str = r#"{"agents":[{"name":"codex","session_count":2}]}"#;
 const MACHINES: &str = r#"{"machines":["machine-alpha"]}"#;
+const BRANCHES: &str = r#"{"branches":[{"project":"project-beta","branch":"feature/source-scope","token":"opaque-wrong-project-token"},{"project":"project-alpha","branch":"feature/source-scope","token":"opaque-project-alpha-token"}]}"#;
 
 #[derive(Clone, Copy)]
 enum Route {
@@ -29,6 +30,7 @@ enum Route {
     Projects(usize),
     Agents,
     Machines,
+    Branches,
 }
 
 #[derive(Default)]
@@ -149,6 +151,8 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         Route::Agents
     } else if path.starts_with("/api/v1/machines") {
         Route::Machines
+    } else if path.starts_with("/api/v1/branches") {
+        Route::Branches
     } else {
         panic!("unexpected request path {path}");
     };
@@ -182,6 +186,7 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         Route::Projects(_) => ("200 OK", PROJECTS.to_owned()),
         Route::Agents => ("200 OK", AGENTS.to_owned()),
         Route::Machines => ("200 OK", MACHINES.to_owned()),
+        Route::Branches => ("200 OK", BRANCHES.to_owned()),
     };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -257,6 +262,7 @@ async fn initial_load_requests_report_and_all_metadata() {
         BTreeSet::from([
             "/api/v1/activity/report".to_owned(),
             "/api/v1/agents".to_owned(),
+            "/api/v1/branches".to_owned(),
             "/api/v1/machines".to_owned(),
             "/api/v1/projects".to_owned(),
         ])
@@ -297,6 +303,45 @@ async fn timeline_inspection_loads_the_exact_v6_bucket_page() {
         .expect("record v6 session-page request");
     assert!(path.starts_with("/api/v1/activity/report/fixture-report-id/sessions?"));
     assert!(path.contains("bucket=0"));
+}
+
+#[tokio::test]
+async fn launch_context_scopes_the_first_visible_report_to_the_exact_project_branch_pair() {
+    // If startup loses the source context, matches only the branch name, or omits the opaque
+    // token, the first visible Activity report includes unrelated repository work.
+    let server = RecordingServer::start().await;
+    let config = server.config(Duration::from_secs(60));
+    let mut app = app(&config, NaiveDate::from_ymd_opt(2026, 8, 9).unwrap());
+    let source = SourceContext::new(
+        "https://example.invalid/project-alpha",
+        "feature/source-scope",
+    );
+    let mut runtime = Runtime::new_with_source_context(&config, Some(source)).unwrap();
+
+    runtime.start(&mut app);
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.report_state(), ReportState::Ready { .. })
+            && server.state.report_count.load(Ordering::SeqCst) == 2
+    })
+    .await;
+
+    assert_eq!(app.selection().project.as_deref(), Some("project-alpha"));
+    assert_eq!(
+        app.selection().git_branch.as_deref(),
+        Some("opaque-project-alpha-token")
+    );
+    let report_paths = server
+        .paths()
+        .into_iter()
+        .filter(|path| path.split('?').next() == Some("/api/v1/activity/report"))
+        .collect::<Vec<_>>();
+    assert_eq!(report_paths.len(), 2);
+    assert!(!report_paths[0].contains("project="));
+    assert!(!report_paths[0].contains("git_branch="));
+    assert!(report_paths[1].contains("project=project-alpha"));
+    assert!(report_paths[1].contains("git_branch=opaque-project-alpha-token"));
+    assert!(!report_paths[1].contains("opaque-wrong-project-token"));
 }
 
 #[tokio::test]
@@ -523,10 +568,10 @@ async fn dropping_runtime_aborts_every_owned_request() {
     let mut runtime = Runtime::new(&config).unwrap();
 
     runtime.start(&mut app);
-    wait_until(|| server.paths().len() == 4).await;
+    wait_until(|| server.paths().len() == 5).await;
     drop(runtime);
 
-    wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 4).await;
+    wait_until(|| server.state.cancellations.load(Ordering::SeqCst) == 5).await;
 }
 
 #[tokio::test]

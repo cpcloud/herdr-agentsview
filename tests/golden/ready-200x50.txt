@@ -1,5 +1,5 @@
 AgentsView                                                                                                                                                                               Updated 12s ago
-Date 2026-08-08 · Project All · Agent All · Machine All · Session All
+Date 2026-08-08 · Project All · Branch All · Agent All · Machine All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │Agents                                │ Time                          │ Work                             │ Sessions                                                        │ Projects                 │
 │▲ 7 @ 06:00                           │ ● 25m  ○ 5m                   │ ◷ 30 / $6.50                     │ 3 = 2 int + 1 auto · 1 unt                                      │ 3 · 3 models             │
