@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,18 +21,29 @@ struct FakeHerdr {
 impl FakeHerdr {
     fn new() -> Self {
         let root = tempfile::tempdir().expect("create fake Herdr directory");
-        let executable = root.path().join("fake-herdr");
-        let interpreter = option_env!("BASH_BIN_PATH").unwrap_or("/usr/bin/env bash");
-        let sleep = option_env!("SLEEP_BIN_PATH").unwrap_or("sleep");
-        let script =
-            include_str!("bin/fake-herdr.sh").replacen("/usr/bin/env bash", interpreter, 1);
-        let script = script.replace("@@SLEEP@@", sleep);
-        fs::write(&executable, script).expect("write fake Herdr executable");
-        let mut permissions = fs::metadata(&executable)
-            .expect("read fake Herdr metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).expect("make fake Herdr executable");
+        let executable = root
+            .path()
+            .join(format!("fake-herdr{}", std::env::consts::EXE_SUFFIX));
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/bin/fake-herdr.rs");
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let output = Command::new(compiler)
+            .args([
+                "--edition=2021",
+                "--crate-name",
+                "fake_herdr",
+                "-D",
+                "warnings",
+            ])
+            .arg(source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .expect("compile fake Herdr executable");
+        assert!(
+            output.status.success(),
+            "compile fake Herdr executable: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         Self { root, executable }
     }
 
@@ -44,7 +55,10 @@ impl FakeHerdr {
             .env("PATH", std::env::var_os("PATH").expect("test PATH"))
             .env("HERDR_BIN_PATH", &self.executable)
             .env("HERDR_PANE_ID", "workspace-a:p3")
-            .env("HERDR_SOCKET_PATH", "/tmp/fake-herdr.sock")
+            .env(
+                "HERDR_SOCKET_PATH",
+                self.root.path().join("fake-herdr.sock"),
+            )
             .env("FAKE_HERDR_DIR", self.root.path())
             .env("FAKE_HERDR_MODE", mode);
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
@@ -61,12 +75,12 @@ impl FakeHerdr {
             .collect()
     }
 
-    fn child_pid(&self) -> u32 {
-        fs::read_to_string(self.root.path().join("pid"))
-            .expect("read fake Herdr pid")
+    fn hang_endpoint(&self) -> SocketAddr {
+        fs::read_to_string(self.root.path().join("endpoint"))
+            .expect("read fake Herdr endpoint")
             .trim()
             .parse()
-            .expect("parse fake Herdr pid")
+            .expect("parse fake Herdr endpoint")
     }
 }
 
@@ -104,16 +118,14 @@ fn open_targets_the_invoking_pane_without_writing_plugin_state() {
     );
     let created_names = fs::read_dir(fake.root.path())
         .expect("list fake Herdr directory")
-        .map(|entry| {
-            entry
-                .expect("read fake Herdr directory entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
+        .map(|entry| entry.expect("read fake Herdr directory entry").file_name())
         .collect::<Vec<_>>();
     assert_eq!(created_names.len(), 2);
-    assert!(created_names.iter().any(|name| name == "fake-herdr"));
+    let executable_name = fake
+        .executable
+        .file_name()
+        .expect("fake Herdr executable name");
+    assert!(created_names.iter().any(|name| name == executable_name));
     assert!(created_names.iter().any(|name| name == "calls"));
 }
 
@@ -140,22 +152,17 @@ fn open_times_out_and_terminates_a_hung_herdr_process() {
     assert!(!output.status.success());
     assert!(started_at.elapsed() < Duration::from_secs(5));
     assert!(String::from_utf8_lossy(&output.stderr).contains("timed out after 3 seconds"));
-    let pid = fake.child_pid();
+    let endpoint = fake.hang_endpoint();
     let deadline = Instant::now() + Duration::from_secs(1);
-    while process_exists(pid) && Instant::now() < deadline {
+    while endpoint_accepts_connections(endpoint) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        !process_exists(pid),
-        "hung fake Herdr process {pid} survived"
+        !endpoint_accepts_connections(endpoint),
+        "hung fake Herdr process still listens on {endpoint}"
     );
 }
 
-fn process_exists(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+fn endpoint_accepts_connections(endpoint: SocketAddr) -> bool {
+    TcpStream::connect_timeout(&endpoint, Duration::from_millis(50)).is_ok()
 }
