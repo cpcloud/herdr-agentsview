@@ -51,7 +51,6 @@ impl FakeHerdr {
         let mut command = Command::new(BINARY);
         command
             .arg("open")
-            .env_clear()
             .env("PATH", std::env::var_os("PATH").expect("test PATH"))
             .env("HERDR_BIN_PATH", &self.executable)
             .env("HERDR_PANE_ID", "workspace-a:p3")
