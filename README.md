@@ -13,7 +13,7 @@ SPDX-License-Identifier: Apache-2.0
 [AgentsView](https://github.com/kenn-io/agentsview) activity, compressed into one
 very busy terminal.
 
-![Synthetic AgentsView Activity dashboard](assets/dashboard.png)
+![Synthetic AgentsView Activity dashboard with compact colored summary metrics](assets/dashboard.png)
 
 ## Install
 
