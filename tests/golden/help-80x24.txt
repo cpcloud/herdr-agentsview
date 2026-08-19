@@ -1,7 +1,7 @@
 AgentsView                                                       Updated 12s ago
 Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 ┌ Summary · through 13:20 ─────────────────────────────────────────────────────┐
-│Conc┌ Keyboard help ─────────────────────────────────────────────────────┐    │
+│Agen┌ Keyboard help ─────────────────────────────────────────────────────┐    │
 │Work│NAVIGATION                                                          │    │
 │Sess│ Tab  next section                 Shift-Tab  previous section      │    │
 └────│ ←/→  change / inspect             ↑/↓  move selection              │────┘

@@ -50,6 +50,33 @@ impl Palette {
         }
     }
 
+    pub(super) fn summary_number(self) -> Style {
+        match self.mode {
+            ColorMode::Color => Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+            ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
+        }
+    }
+
+    pub(super) fn summary_interactive(self) -> Style {
+        match self.mode {
+            ColorMode::Color => Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::BOLD),
+            ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
+        }
+    }
+
+    pub(super) fn summary_automated(self) -> Style {
+        match self.mode {
+            ColorMode::Color => Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+            ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
+        }
+    }
+
     pub(super) fn mixed_activity(self) -> Style {
         match self.mode {
             ColorMode::Color => Style::default().fg(Color::LightBlue).bg(Color::LightYellow),

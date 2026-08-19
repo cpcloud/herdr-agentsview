@@ -1,9 +1,9 @@
 AgentsView                                                       Updated 12s ago
 Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────┐
-│Concurrent agents  Peak 7 @ 06:00  │  Time  Active 25m · Idle 5m              │
-│Work  30 agent-min · $6.50 cost  │  Scope  3 projects · 3 models              │
-│Sessions  3 total · 2 int · 1 auto · 1 untimed                                │
+│Agents  ▲ 7 @ 06:00                   │ Time  ● 25m  ○ 5m                     │
+│Work  ◷ 30 / $6.50                    │ Projects  3 · 3 models                │
+│Sessions  3 = 2 int + 1 auto · 1 unt                                          │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Concurrent agents ───────────────────────────────────────────────────────────┐
 │Interactive  Automated  · observed zero                                       │
