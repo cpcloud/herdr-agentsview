@@ -79,14 +79,92 @@ pub(super) fn render(
 
     let reserved = 2;
     let chart_height = inner.height.saturating_sub(reserved).max(1);
-    let chart = Rect::new(inner.x, inner.y + 1, inner.width, chart_height);
+    let chart_area = Rect::new(inner.x, inner.y + 1, inner.width, chart_height);
+    let peak = chart_peak(report);
+    let (y_axis, chart) = chart_geometry(chart_area, peak);
+    render_y_axis(buffer, y_axis, peak, palette);
     render_chart(buffer, chart, app, palette);
 
-    let axis_y = chart.y + chart.height;
+    let axis_y = chart_area.y + chart_area.height;
     if axis_y < inner.y + inner.height {
-        let axis = timeline_axis(report, class, usize::from(inner.width));
+        let axis = timeline_axis(report, class, usize::from(chart.width));
         Paragraph::new(Line::from(Span::styled(axis, palette.muted())))
-            .render(Rect::new(inner.x, axis_y, inner.width, 1), buffer);
+            .render(Rect::new(chart.x, axis_y, chart.width, 1), buffer);
+    }
+}
+
+fn chart_peak(report: &Report) -> usize {
+    report
+        .buckets
+        .iter()
+        .take(report.observed_bucket_count())
+        .map(|bucket| {
+            bucket
+                .interactive_at_peak
+                .saturating_add(bucket.automated_at_peak)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn chart_geometry(area: Rect, peak: usize) -> (Rect, Rect) {
+    let axis_width = if area.height == 1 {
+        UnicodeWidthStr::width(compact_y_axis_label(peak).as_str())
+    } else {
+        peak.to_string().len() + 2
+    };
+    let axis_width = u16::try_from(axis_width)
+        .unwrap_or(u16::MAX)
+        .min(area.width.saturating_sub(1));
+    let axis = Rect::new(area.x, area.y, axis_width, area.height);
+    let chart = Rect::new(
+        area.x.saturating_add(axis_width),
+        area.y,
+        area.width.saturating_sub(axis_width),
+        area.height,
+    );
+    (axis, chart)
+}
+
+fn render_y_axis(buffer: &mut Buffer, area: Rect, peak: usize, palette: Palette) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if area.height == 1 {
+        let label = compact_y_axis_label(peak);
+        Paragraph::new(Line::from(Span::styled(label, palette.muted()))).render(area, buffer);
+        return;
+    }
+
+    let rule_x = area.x + area.width - 1;
+    for row in 0..area.height {
+        buffer[(rule_x, area.y + row)]
+            .set_symbol("│")
+            .set_style(palette.muted());
+    }
+    let label_width = usize::from(area.width.saturating_sub(2));
+    for (row, value) in y_axis_ticks(peak, usize::from(area.height)) {
+        let label = format!("{value:>label_width$} ");
+        Paragraph::new(Line::from(Span::styled(label, palette.muted()))).render(
+            Rect::new(area.x, area.y + row as u16, area.width - 1, 1),
+            buffer,
+        );
+        let symbol = if row + 1 == usize::from(area.height) {
+            "┼"
+        } else {
+            "┤"
+        };
+        buffer[(rule_x, area.y + row as u16)]
+            .set_symbol(symbol)
+            .set_style(palette.muted());
+    }
+}
+
+fn compact_y_axis_label(peak: usize) -> String {
+    if peak == 0 {
+        "0│".to_owned()
+    } else {
+        format!("0–{peak}│")
     }
 }
 
@@ -150,18 +228,7 @@ fn render_chart(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) {
         return;
     };
     let observed = report.observed_bucket_count();
-    let peak = report
-        .buckets
-        .iter()
-        .take(observed)
-        .map(|bucket| {
-            bucket
-                .interactive_at_peak
-                .saturating_add(bucket.automated_at_peak)
-        })
-        .max()
-        .unwrap_or(0)
-        .max(1);
+    let peak = chart_peak(report);
     let observed_columns = observed_columns(report, usize::from(area.width));
     let cursor_columns = app
         .timeline_inspection_active()
@@ -299,6 +366,30 @@ fn observed_columns(report: &Report, width: usize) -> usize {
         .expect("observed timeline width is bounded by the terminal width")
 }
 
+fn y_axis_ticks(peak: usize, height: usize) -> Vec<(usize, usize)> {
+    if height == 0 {
+        return Vec::new();
+    }
+    let bottom = height - 1;
+    if peak == 0 {
+        return vec![(bottom, 0)];
+    }
+
+    let intervals = peak.min(bottom);
+    (0..=intervals)
+        .map(|index| {
+            let denominator = intervals as u128;
+            let row = (index as u128 * bottom as u128 + denominator / 2) / denominator;
+            let value =
+                (peak as u128 * (intervals - index) as u128 + denominator / 2) / denominator;
+            (
+                usize::try_from(row).expect("axis row is bounded by the chart height"),
+                usize::try_from(value).expect("axis tick is bounded by the chart peak"),
+            )
+        })
+        .collect()
+}
+
 fn column_bucket(
     buckets: &[crate::wire::Bucket],
     observed: usize,
@@ -405,8 +496,8 @@ mod tests {
     use crate::wire::{Bucket, Money, Report, ReportSelection};
 
     use super::{
-        bucket_column_range, column_bucket, observed_columns, place_labels, render_chart,
-        scaled_stack, timeline_axis,
+        bucket_column_range, column_bucket, compact_y_axis_label, observed_columns, place_labels,
+        render_chart, scaled_stack, timeline_axis, y_axis_ticks,
     };
 
     #[test]
@@ -636,6 +727,31 @@ mod tests {
         let mut after = fixture_report();
         after.effective_end = after.range_end + chrono::Duration::minutes(5);
         assert_eq!(observed_columns(&after, 80), 80);
+    }
+
+    #[test]
+    fn y_axis_ticks_span_zero_one_small_and_large_scales_without_duplicates() {
+        // If tick interpolation rounds neighboring rows to the same value, the axis repeats a
+        // label and implies resolution the chart does not have. Endpoints must remain exact.
+        for (peak, height, expected) in [
+            (0, 5, vec![(4, 0)]),
+            (1, 5, vec![(0, 1), (4, 0)]),
+            (2, 5, vec![(0, 2), (2, 1), (4, 0)]),
+            (7, 5, vec![(0, 7), (1, 5), (2, 4), (3, 2), (4, 0)]),
+            (250, 3, vec![(0, 250), (1, 125), (2, 0)]),
+        ] {
+            assert_eq!(y_axis_ticks(peak, height), expected);
+        }
+        assert!(y_axis_ticks(7, 0).is_empty());
+    }
+
+    #[test]
+    fn compact_y_axis_uses_one_zero_and_explicit_nonzero_ranges() {
+        // If compact mode always prints both endpoints, an empty chart repeats zero and looks
+        // like it has two distinct bounds; nonzero charts still need both ends of the scale.
+        assert_eq!(compact_y_axis_label(0), "0│");
+        assert_eq!(compact_y_axis_label(1), "0–1│");
+        assert_eq!(compact_y_axis_label(250), "0–250│");
     }
 
     #[test]
