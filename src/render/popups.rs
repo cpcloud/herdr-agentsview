@@ -200,6 +200,7 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 fn focus_name(focus: Focus) -> &'static str {
     match focus {
         Focus::Project => "Project",
+        Focus::Branch => "Branch",
         Focus::Agent => "Agent",
         Focus::Machine => "Machine",
         Focus::Automation => "Session category",

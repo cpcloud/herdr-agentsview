@@ -7,7 +7,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -25,7 +25,7 @@ use crate::api::{ActivityClient, ApiError};
 use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState, SessionPageRequest};
 use crate::config::PluginConfig;
 use crate::render::{self, TerminalCapabilities};
-use crate::wire::{AgentInfo, ProjectInfo, Report, ReportSelection};
+use crate::wire::{AgentInfo, BranchInfo, ProjectInfo, ProjectResolution, Report, ReportSelection};
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const STATUS_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
@@ -51,6 +51,10 @@ enum Completion {
         token: u64,
         result: Result<Vec<ProjectInfo>, ApiError>,
     },
+    Branches {
+        token: u64,
+        result: Result<Vec<BranchInfo>, ApiError>,
+    },
     Agents {
         token: u64,
         result: Result<Vec<AgentInfo>, ApiError>,
@@ -68,6 +72,7 @@ pub struct Runtime {
     report: Option<OwnedTask>,
     session_page: Option<OwnedTask>,
     projects: Option<OwnedTask>,
+    branches: Option<OwnedTask>,
     agents: Option<OwnedTask>,
     machines: Option<OwnedTask>,
     task_token: u64,
@@ -77,15 +82,63 @@ pub struct Runtime {
     refresh_interval: Duration,
     next_refresh: Instant,
     executor: tokio::runtime::Handle,
+    source_scope: Option<PendingSourceScope>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceContext {
+    normalized_remote: String,
+    branch: String,
+}
+
+impl SourceContext {
+    pub fn new(normalized_remote: impl Into<String>, branch: impl Into<String>) -> Self {
+        Self {
+            normalized_remote: normalized_remote.into(),
+            branch: branch.into(),
+        }
+    }
+
+    fn from_env() -> Option<Self> {
+        let normalized_remote = std::env::var(crate::herdr::SOURCE_REMOTE_ENV).ok()?;
+        let branch = std::env::var(crate::herdr::SOURCE_BRANCH_ENV).ok()?;
+        if normalized_remote.is_empty() || branch.is_empty() {
+            return None;
+        }
+        Some(Self::new(normalized_remote, branch))
+    }
+}
+
+struct PendingSourceScope {
+    context: SourceContext,
+    report: Option<SourceReport>,
+    branches: Option<Result<Vec<BranchInfo>, ApiError>>,
+}
+
+type SourceReport = (Result<Box<Report>, ApiError>, DateTime<Utc>);
 
 impl Runtime {
     pub fn new(config: &PluginConfig) -> anyhow::Result<Self> {
         Self::new_at(config, Instant::now())
     }
 
+    pub fn new_with_source_context(
+        config: &PluginConfig,
+        source_context: Option<SourceContext>,
+    ) -> anyhow::Result<Self> {
+        Self::new_at_with_source_context(config, Instant::now(), source_context)
+    }
+
     #[doc(hidden)]
     pub fn new_at(config: &PluginConfig, now: Instant) -> anyhow::Result<Self> {
+        Self::new_at_with_source_context(config, now, None)
+    }
+
+    fn new_at_with_source_context(
+        config: &PluginConfig,
+        now: Instant,
+        source_context: Option<SourceContext>,
+    ) -> anyhow::Result<Self> {
         let executor = tokio::runtime::Handle::try_current()
             .context("Activity request runtime is not running")?;
         let next_refresh = now
@@ -99,6 +152,7 @@ impl Runtime {
             report: None,
             session_page: None,
             projects: None,
+            branches: None,
             agents: None,
             machines: None,
             task_token: 0,
@@ -108,12 +162,22 @@ impl Runtime {
             refresh_interval: config.refresh_interval,
             next_refresh,
             executor,
+            source_scope: source_context.map(|context| PendingSourceScope {
+                context,
+                report: None,
+                branches: None,
+            }),
         })
     }
 
     pub fn start(&mut self, app: &mut App) {
-        self.dispatch(AppCommand::FetchReport(app.begin_foreground_load()));
+        if self.source_scope.is_some() {
+            self.spawn_report(app.begin_foreground_load());
+        } else {
+            self.dispatch(AppCommand::FetchReport(app.begin_foreground_load()));
+        }
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Projects));
+        self.dispatch(AppCommand::FetchMetadata(MetadataKind::Branches));
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Agents));
         self.dispatch(AppCommand::FetchMetadata(MetadataKind::Machines));
     }
@@ -121,6 +185,7 @@ impl Runtime {
     pub fn dispatch(&mut self, command: AppCommand) -> bool {
         match command {
             AppCommand::FetchReport(request) => {
+                self.source_scope = None;
                 self.reset_report_backoff();
                 self.spawn_report(request);
             }
@@ -205,6 +270,10 @@ impl Runtime {
                     token,
                     result: client.fetch_projects().await,
                 },
+                MetadataKind::Branches => Completion::Branches {
+                    token,
+                    result: client.fetch_branches().await,
+                },
                 MetadataKind::Agents => Completion::Agents {
                     token,
                     result: client.fetch_agents().await,
@@ -230,9 +299,11 @@ impl Runtime {
                     return false;
                 }
                 self.reset_report_backoff();
-                app.apply_report(result, received_at);
-                if let Some(request) = app.begin_session_page_request() {
-                    self.spawn_session_page(request);
+                if let Some(pending) = &mut self.source_scope {
+                    pending.report = Some((result, received_at));
+                    self.finish_source_scope(app);
+                } else {
+                    self.apply_report_result(app, result, received_at);
                 }
             }
             Completion::SessionPage {
@@ -251,6 +322,16 @@ impl Runtime {
                     return false;
                 }
                 app.apply_projects(result);
+            }
+            Completion::Branches { token, result } => {
+                if !take_current(&mut self.branches, token) {
+                    return false;
+                }
+                app.apply_branches(result.clone());
+                if let Some(pending) = &mut self.source_scope {
+                    pending.branches = Some(result);
+                    self.finish_source_scope(app);
+                }
             }
             Completion::Agents { token, result } => {
                 if !take_current(&mut self.agents, token) {
@@ -271,8 +352,48 @@ impl Runtime {
     fn metadata_slot_mut(&mut self, kind: MetadataKind) -> &mut Option<OwnedTask> {
         match kind {
             MetadataKind::Projects => &mut self.projects,
+            MetadataKind::Branches => &mut self.branches,
             MetadataKind::Agents => &mut self.agents,
             MetadataKind::Machines => &mut self.machines,
+        }
+    }
+
+    fn finish_source_scope(&mut self, app: &mut App) {
+        let ready = self
+            .source_scope
+            .as_ref()
+            .is_some_and(|pending| pending.report.is_some() && pending.branches.is_some());
+        if !ready {
+            return;
+        }
+        let mut pending = self.source_scope.take().expect("checked source scope");
+        let (report, received_at) = pending.report.take().expect("checked source report");
+        let branches = pending.branches.take().expect("checked source branches");
+        let (report, branches) = match (report, branches) {
+            (Ok(report), Ok(branches)) => (report, branches),
+            (result, _) => {
+                self.apply_report_result(app, result, received_at);
+                return;
+            }
+        };
+        let Some((project, token)) = resolve_source_scope(&report, &branches, &pending.context)
+        else {
+            self.apply_report_result(app, Ok(report), received_at);
+            return;
+        };
+        app.apply_source_scope(project, token);
+        self.spawn_report(app.begin_foreground_load());
+    }
+
+    fn apply_report_result(
+        &mut self,
+        app: &mut App,
+        result: Result<Box<Report>, ApiError>,
+        received_at: DateTime<Utc>,
+    ) {
+        app.apply_report(result, received_at);
+        if let Some(request) = app.begin_session_page_request() {
+            self.spawn_session_page(request);
         }
     }
 
@@ -316,6 +437,7 @@ impl Drop for Runtime {
         abort_task(&mut self.report);
         abort_task(&mut self.session_page);
         abort_task(&mut self.projects);
+        abort_task(&mut self.branches);
         abort_task(&mut self.agents);
         abort_task(&mut self.machines);
     }
@@ -347,9 +469,36 @@ pub fn run(config: PluginConfig) -> anyhow::Result<()> {
         config.refresh_interval,
     );
     app.set_color_mode(terminal_capabilities().color_mode());
-    let mut runtime = Runtime::new(&config)?;
+    let mut runtime = Runtime::new_with_source_context(&config, SourceContext::from_env())?;
     runtime.start(&mut app);
     run_terminal(&mut app, &mut runtime, config.timezone)
+}
+
+fn resolve_source_scope(
+    report: &Report,
+    branches: &[BranchInfo],
+    context: &SourceContext,
+) -> Option<(String, String)> {
+    let mut projects = report.projects.values().filter(|project| {
+        project.resolution == ProjectResolution::Resolved
+            && project
+                .identity
+                .as_ref()
+                .and_then(|identity| identity.normalized_remote.as_deref())
+                == Some(context.normalized_remote.as_str())
+    });
+    let project = projects.next()?;
+    if projects.next().is_some() {
+        return None;
+    }
+    let mut matches = branches.iter().filter(|branch| {
+        branch.project == project.display_label && branch.branch == context.branch
+    });
+    let branch = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some((project.display_label.clone(), branch.token.clone()))
 }
 
 fn run_terminal(

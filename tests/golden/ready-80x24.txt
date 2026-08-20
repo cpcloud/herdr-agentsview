@@ -1,5 +1,5 @@
 AgentsView                                                       Updated 12s ago
-Date 2026-08-08 · Proj All · Agent All · Host All · Session All
+Date 2026-08-08 · Proj All · Br All · Agent All · Host All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────┐
 │Agents  ▲ 7 @ 06:00                   │ Time  ● 25m  ○ 5m                     │
 │Work  ◷ 30 / $6.50                    │ Projects  3 · 3 models                │

@@ -10,7 +10,7 @@ use herdr_agentsview::app::{
     App, AppCommand, BreakdownCategory, BreakdownValue, CompactRegion, Focus, InputKey, Loadable,
     MetadataKind, SessionSortColumn, SortDirection,
 };
-use herdr_agentsview::wire::{Automation, ProjectInfo, ReportSelection};
+use herdr_agentsview::wire::{Automation, BranchInfo, ProjectInfo, ReportSelection};
 
 #[path = "support/activity.rs"]
 mod activity_support;
@@ -36,6 +36,7 @@ fn tab_and_backtab_follow_visual_focus_order() {
     let expected = [
         Focus::Date,
         Focus::Project,
+        Focus::Branch,
         Focus::Agent,
         Focus::Machine,
         Focus::Automation,
@@ -97,6 +98,61 @@ fn date_keys_move_calendar_days_and_backspace_restores_today() {
     let command = app.handle_input(InputKey::Right, today());
     assert!(command.is_none());
     assert_eq!(app.selection().date, today());
+}
+
+#[test]
+fn backspace_on_branch_clears_the_automatic_repository_and_branch_scope() {
+    // If Branch clears only its opaque token, the automatic Project scope remains active and
+    // Backspace does not return the operator to all Activity as advertised.
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.apply_branches(Ok(vec![BranchInfo {
+        project: "project-alpha".to_owned(),
+        branch: "feature/source-scope".to_owned(),
+        token: "opaque-project-alpha-token".to_owned(),
+    }]));
+    app.apply_source_scope(
+        "project-alpha".to_owned(),
+        "opaque-project-alpha-token".to_owned(),
+    );
+    app.set_focus(Focus::Branch);
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
+    assert!(app.handle_input(InputKey::Enter, today()).is_none());
+
+    let command = app.handle_input(InputKey::Backspace, today());
+
+    assert!(app.selection().project.is_none());
+    assert!(app.selection().git_branch.is_none());
+    assert_eq!(report_selection(&command), app.selection());
+}
+
+#[test]
+fn changing_project_clears_an_incompatible_branch_scope() {
+    // If Project changes without clearing its project-qualified branch token, the visible
+    // filters disagree and the report keeps filtering the old repository branch.
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.apply_projects(Ok(vec![
+        ProjectInfo {
+            name: "project-alpha".to_owned(),
+            session_count: 2,
+        },
+        ProjectInfo {
+            name: "project-beta".to_owned(),
+            session_count: 1,
+        },
+    ]));
+    app.apply_source_scope(
+        "project-alpha".to_owned(),
+        "opaque-project-alpha-token".to_owned(),
+    );
+    app.set_focus(Focus::Project);
+    app.handle_input(InputKey::Enter, today());
+    app.handle_input(InputKey::Down, today());
+
+    let command = app.handle_input(InputKey::Enter, today());
+
+    assert_eq!(app.selection().project.as_deref(), Some("project-beta"));
+    assert!(app.selection().git_branch.is_none());
+    assert_eq!(report_selection(&command), app.selection());
 }
 
 #[test]

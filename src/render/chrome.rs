@@ -239,7 +239,7 @@ pub(super) fn filter_anchor(
     Some((x as u16, token_width as u16))
 }
 
-fn filter_views(app: &App, compact: bool) -> [FilterView; 5] {
+fn filter_views(app: &App, compact: bool) -> [FilterView; 6] {
     [
         FilterView {
             focus: Focus::Date,
@@ -254,6 +254,13 @@ fn filter_views(app: &App, compact: bool) -> [FilterView; 5] {
             compact_label: "Proj",
             value: metadata_value(app.selection().project.as_deref(), app.projects(), compact),
             failed: matches!(app.projects(), Loadable::Failed(_)),
+        },
+        FilterView {
+            focus: Focus::Branch,
+            full_label: "Branch",
+            compact_label: "Br",
+            value: branch_value(app, compact),
+            failed: matches!(app.branches(), Loadable::Failed(_)),
         },
         FilterView {
             focus: Focus::Agent,
@@ -283,20 +290,20 @@ fn filter_views(app: &App, compact: bool) -> [FilterView; 5] {
     ]
 }
 
-fn filter_value_widths(available: usize, views: &[FilterView; 5]) -> [usize; 5] {
-    let natural: [usize; 5] =
+fn filter_value_widths(available: usize, views: &[FilterView; 6]) -> [usize; 6] {
+    let natural: [usize; 6] =
         std::array::from_fn(|index| UnicodeWidthStr::width(views[index].value.as_str()));
-    let minimum = [10, 3, 3, 3, 3];
+    let minimum = [10, 3, 3, 3, 3, 3];
     let mut widths = std::array::from_fn(|index| natural[index].min(minimum[index]));
     let mut remaining = available.saturating_sub(widths.iter().sum());
 
-    let automation = natural[4].saturating_sub(widths[4]).min(remaining);
-    widths[4] += automation;
+    let automation = natural[5].saturating_sub(widths[5]).min(remaining);
+    widths[5] += automation;
     remaining -= automation;
 
     while remaining > 0 {
         let mut allocated = false;
-        for index in [1, 2, 3] {
+        for index in [1, 2, 3, 4] {
             if widths[index] < natural[index] {
                 widths[index] += 1;
                 remaining -= 1;
@@ -311,6 +318,31 @@ fn filter_value_widths(available: usize, views: &[FilterView; 5]) -> [usize; 5] 
         }
     }
     widths
+}
+
+fn branch_value(app: &App, compact: bool) -> String {
+    let Some(token) = app.selection().git_branch.as_deref() else {
+        return match app.branches() {
+            Loadable::Failed(_) if compact => "!".to_owned(),
+            Loadable::Failed(_) => "unavailable".to_owned(),
+            Loadable::Loading if compact => "…".to_owned(),
+            Loadable::Loading => "loading…".to_owned(),
+            Loadable::Ready(_) => "All".to_owned(),
+        };
+    };
+    match app.branches() {
+        Loadable::Failed(_) if compact => "!".to_owned(),
+        Loadable::Failed(_) => "unavailable".to_owned(),
+        Loadable::Loading if compact => "…".to_owned(),
+        Loadable::Loading => "loading…".to_owned(),
+        Loadable::Ready(branches) => branches
+            .iter()
+            .find(|branch| branch.token == token)
+            .map_or_else(
+                || if compact { "?" } else { "unknown" }.to_owned(),
+                |branch| branch.branch.clone(),
+            ),
+    }
 }
 
 fn metadata_value<T>(selected: Option<&str>, state: &Loadable<Vec<T>>, compact: bool) -> String {

@@ -655,6 +655,7 @@ dependencies = [
  "clap",
  "crossterm",
  "iana-time-zone",
+ "percent-encoding",
  "ratatui",
  "rcgen",
  "reqwest",

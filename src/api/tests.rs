@@ -26,6 +26,7 @@ const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v6.json")
 const PROJECTS_FIXTURE: &str = include_str!("../../tests/fixtures/projects.json");
 const AGENTS_FIXTURE: &str = include_str!("../../tests/fixtures/agents.json");
 const MACHINES_FIXTURE: &str = include_str!("../../tests/fixtures/machines.json");
+const BRANCHES_FIXTURE: &str = r#"{"branches":[]}"#;
 
 fn selection() -> ReportSelection {
     ReportSelection::new(
@@ -65,6 +66,7 @@ async fn report_request_uses_only_supported_activity_query() {
     .unwrap();
     let selection = selection()
         .with_project("project-alpha")
+        .with_git_branch("opaque-token-returned-by-branches-endpoint")
         .with_agent("codex")
         .with_machine("machine-alpha")
         .with_automation(Automation::Automated);
@@ -82,6 +84,10 @@ async fn report_request_uses_only_supported_activity_query() {
             ("date".to_owned(), "2026-08-08".to_owned()),
             ("timezone".to_owned(), "America/New_York".to_owned()),
             ("project".to_owned(), "project-alpha".to_owned()),
+            (
+                "git_branch".to_owned(),
+                "opaque-token-returned-by-branches-endpoint".to_owned(),
+            ),
             ("agent".to_owned(), "codex".to_owned()),
             ("machine".to_owned(), "machine-alpha".to_owned()),
             ("automation".to_owned(), "automated".to_owned()),
@@ -133,6 +139,18 @@ async fn metadata_requests_include_one_shot_and_automated_sessions() {
     assert!(client.fetch_machines().await.unwrap().is_empty());
     let request = machines.take_request().await;
     assert_eq!(request.path, "/api/v1/machines");
+    assert_eq!(request.query, expected_query);
+
+    let mut branches = RecordingServer::start(ResponsePlan::json(BRANCHES_FIXTURE)).await;
+    let client = ActivityClient::new(&config(
+        branches.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+    assert!(client.fetch_branches().await.unwrap().is_empty());
+    let request = branches.take_request().await;
+    assert_eq!(request.path, "/api/v1/branches");
     assert_eq!(request.query, expected_query);
 }
 

@@ -12,7 +12,9 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::api::{ApiError, ApiErrorKind, SessionFetch};
-use crate::wire::{AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection, SessionRow};
+use crate::wire::{
+    AgentInfo, BranchInfo, KeyMinutes, ProjectInfo, Report, ReportSelection, SessionRow,
+};
 
 pub(crate) use filters::PopupQueryEdit;
 pub use filters::{CompactRegion, FilterPopup, Focus, MetadataKind};
@@ -86,6 +88,7 @@ pub struct App {
     refresh_interval: Duration,
     report_state: ReportState,
     projects: Loadable<Vec<ProjectInfo>>,
+    branches: Loadable<Vec<BranchInfo>>,
     agents: Loadable<Vec<AgentInfo>>,
     machines: Loadable<Vec<String>>,
     focus: Focus,
@@ -102,6 +105,7 @@ pub struct App {
     breakdown_value: BreakdownValue,
     compact_region: CompactRegion,
     color_mode: ColorMode,
+    source_scope_active: bool,
 }
 
 impl App {
@@ -111,6 +115,7 @@ impl App {
             refresh_interval,
             report_state: ReportState::InitialLoading,
             projects: Loadable::Loading,
+            branches: Loadable::Loading,
             agents: Loadable::Loading,
             machines: Loadable::Loading,
             focus: Focus::Date,
@@ -127,6 +132,7 @@ impl App {
             breakdown_value: BreakdownValue::AgentMinutes,
             compact_region: CompactRegion::Sessions,
             color_mode: ColorMode::Color,
+            source_scope_active: false,
         }
     }
 
@@ -279,6 +285,16 @@ impl App {
         self.projects = result.into();
     }
 
+    pub fn apply_branches(&mut self, result: Result<Vec<BranchInfo>, ApiError>) {
+        self.branches = result.into();
+    }
+
+    pub fn apply_source_scope(&mut self, project: String, git_branch: String) {
+        self.selection.project = Some(project);
+        self.selection.git_branch = Some(git_branch);
+        self.source_scope_active = true;
+    }
+
     pub fn apply_agents(&mut self, result: Result<Vec<AgentInfo>, ApiError>) {
         self.agents = result.into();
     }
@@ -289,6 +305,10 @@ impl App {
 
     pub fn projects(&self) -> &Loadable<Vec<ProjectInfo>> {
         &self.projects
+    }
+
+    pub fn branches(&self) -> &Loadable<Vec<BranchInfo>> {
+        &self.branches
     }
 
     pub fn agents(&self) -> &Loadable<Vec<AgentInfo>> {
@@ -302,6 +322,7 @@ impl App {
     pub fn retry_metadata(&mut self, kind: MetadataKind) -> AppCommand {
         match kind {
             MetadataKind::Projects => self.projects = Loadable::Loading,
+            MetadataKind::Branches => self.branches = Loadable::Loading,
             MetadataKind::Agents => self.agents = Loadable::Loading,
             MetadataKind::Machines => self.machines = Loadable::Loading,
         }

@@ -15,7 +15,8 @@ fn main() {
     let root = env::var_os("FAKE_HERDR_DIR")
         .map(PathBuf::from)
         .expect("FAKE_HERDR_DIR");
-    let call = env::args().skip(1).collect::<Vec<_>>().join("\t");
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let call = args.join("\t");
     writeln!(
         OpenOptions::new()
             .create(true)
@@ -25,6 +26,22 @@ fn main() {
         "{call}"
     )
     .expect("record fake Herdr call");
+
+    if args.first().map(String::as_str) == Some("pane")
+        && args.get(1).map(String::as_str) == Some("get")
+    {
+        if let Some(foreground_cwd) = env::var_os("FAKE_HERDR_FOREGROUND_CWD") {
+            let foreground_cwd = foreground_cwd.to_string_lossy();
+            let foreground_cwd = foreground_cwd.replace('\\', "\\\\").replace('"', "\\\"");
+            println!(
+                "{{\"result\":{{\"pane\":{{\"cwd\":\"/fallback/cwd\",\"foreground_cwd\":\"{foreground_cwd}\"}}}}}}"
+            );
+        } else {
+            let response = r#"{"result":{"pane":{"cwd":"","foreground_cwd":null}}}"#;
+            println!("{response}");
+        }
+        return;
+    }
 
     match env::var("FAKE_HERDR_MODE").as_deref().unwrap_or("success") {
         "failure" => {

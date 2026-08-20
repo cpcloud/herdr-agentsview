@@ -112,7 +112,7 @@ impl App {
                 hint("←/→", "day", "←/→ day"),
                 hint("Backspace", "today", "Bksp today"),
             ],
-            Focus::Project | Focus::Agent | Focus::Machine | Focus::Automation => {
+            Focus::Project | Focus::Branch | Focus::Agent | Focus::Machine | Focus::Automation => {
                 let mut hints = Vec::new();
                 if self.focused_filter_is_ready() {
                     hints.push(hint("Enter", "choose", "Enter choose"));
@@ -193,7 +193,7 @@ impl App {
                     return self.foreground_command();
                 }
             }
-            Focus::Project | Focus::Agent | Focus::Machine | Focus::Automation => {
+            Focus::Project | Focus::Branch | Focus::Agent | Focus::Machine | Focus::Automation => {
                 if key == InputKey::Enter {
                     self.open_filter_popup();
                 }

@@ -7,7 +7,7 @@ use std::time::Duration;
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
 use herdr_agentsview::app::{App, BreakdownValue, Focus, InputKey};
 use herdr_agentsview::render::{self, ColorMode, LayoutClass, TerminalCapabilities};
-use herdr_agentsview::wire::{Automation, Money, ProjectInfo};
+use herdr_agentsview::wire::{Automation, BranchInfo, Money, ProjectInfo};
 use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthStr;
 
@@ -114,11 +114,34 @@ fn compact_filters_keep_every_label_without_a_text_focus_marker() {
     let text = render::to_text_at(&app, 80, 24, render_time());
     let filters = text.lines().nth(1).expect("header has a filter row");
 
-    for label in ["Date", "Proj", "Agent", "Host", "Session Interactive"] {
+    for label in ["Date", "Proj", "Br", "Agent", "Host", "Session Interactive"] {
         assert!(filters.contains(label), "missing {label:?}\n{filters}");
     }
     assert!(!filters.contains(">Session"), "{filters}");
     assert_eq!(UnicodeWidthStr::width(filters), 80);
+}
+
+#[test]
+fn automatic_source_scope_is_visible_as_project_and_branch_filters() {
+    // If the Branch filter renders the opaque token or is omitted, the operator cannot tell
+    // that Activity opened on the invoking pane's repository and branch.
+    let mut app = ready_app(ColorMode::Monochrome);
+    app.apply_branches(Ok(vec![BranchInfo {
+        project: "project-alpha".to_owned(),
+        branch: "feature/source-scope".to_owned(),
+        token: "opaque-project-alpha-token".to_owned(),
+    }]));
+    app.apply_source_scope(
+        "project-alpha".to_owned(),
+        "opaque-project-alpha-token".to_owned(),
+    );
+
+    let text = render::to_text_at(&app, 120, 40, render_time());
+    let filters = text.lines().nth(1).expect("header has a filter row");
+
+    assert!(filters.contains("Project project-alpha"), "{filters}");
+    assert!(filters.contains("Branch feature/source-scope"), "{filters}");
+    assert!(!filters.contains("opaque-project-alpha-token"), "{filters}");
 }
 
 #[test]
@@ -138,7 +161,14 @@ fn medium_and_wide_filters_budget_long_metadata_values() {
         let text = render::to_text_at(&app, width, height, render_time());
         let filters = text.lines().nth(1).expect("header has a filter row");
 
-        for label in ["Date", "Project", "Agent", "Machine", "Session Interactive"] {
+        for label in [
+            "Date",
+            "Project",
+            "Branch",
+            "Agent",
+            "Machine",
+            "Session Interactive",
+        ] {
             assert!(filters.contains(label), "missing {label:?}\n{filters}");
         }
         assert!(!filters.contains(">Session"), "{filters}");

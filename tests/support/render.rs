@@ -10,7 +10,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
 use herdr_agentsview::app::App;
 use herdr_agentsview::render::ColorMode;
-use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report};
+use herdr_agentsview::wire::{AgentInfo, BranchInfo, Bucket, Money, ProjectInfo, Report};
 
 use super::activity::{received_at, report, selection};
 
@@ -123,6 +123,18 @@ pub fn app_with_report(value: Report, color_mode: ColorMode) -> App {
         ProjectInfo {
             name: "project-beta".to_owned(),
             session_count: 1,
+        },
+    ]));
+    app.apply_branches(Ok(vec![
+        BranchInfo {
+            project: "project-alpha".to_owned(),
+            branch: "main".to_owned(),
+            token: "opaque-project-alpha-main".to_owned(),
+        },
+        BranchInfo {
+            project: "project-beta".to_owned(),
+            branch: "main".to_owned(),
+            token: "opaque-project-beta-main".to_owned(),
         },
     ]));
     app.apply_agents(Ok(vec![

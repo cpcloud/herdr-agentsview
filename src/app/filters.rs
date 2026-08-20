@@ -14,6 +14,7 @@ use super::{App, Loadable};
 pub enum Focus {
     Date,
     Project,
+    Branch,
     Agent,
     Machine,
     Automation,
@@ -25,6 +26,7 @@ pub enum Focus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MetadataKind {
     Projects,
+    Branches,
     Agents,
     Machines,
 }
@@ -39,6 +41,7 @@ pub enum CompactRegion {
 enum FilterChoice {
     All,
     Text(String),
+    Branch { project: String, token: String },
     Automation(Automation),
 }
 
@@ -90,6 +93,7 @@ impl App {
             Focus::Breakdowns => self.compact_region = CompactRegion::Breakdown,
             Focus::Date
             | Focus::Project
+            | Focus::Branch
             | Focus::Agent
             | Focus::Machine
             | Focus::Automation
@@ -103,7 +107,7 @@ impl App {
     }
 
     pub fn set_project(&mut self, project: Option<String>) {
-        self.selection.project = project;
+        self.replace_project(project);
     }
 
     pub fn set_agent(&mut self, agent: Option<String>) {
@@ -115,9 +119,10 @@ impl App {
     }
 
     pub(crate) fn move_focus(&mut self, delta: isize) {
-        const ORDER: [Focus; 8] = [
+        const ORDER: [Focus; 9] = [
             Focus::Date,
             Focus::Project,
+            Focus::Branch,
             Focus::Agent,
             Focus::Machine,
             Focus::Automation,
@@ -150,7 +155,8 @@ impl App {
     pub(crate) fn clear_focused_filter(&mut self, today: NaiveDate) -> bool {
         match self.focus {
             Focus::Date => replace_if_changed(&mut self.selection.date, today),
-            Focus::Project => take_if_some(&mut self.selection.project),
+            Focus::Project => self.clear_project(),
+            Focus::Branch => self.clear_branch(),
             Focus::Agent => take_if_some(&mut self.selection.agent),
             Focus::Machine => take_if_some(&mut self.selection.machine),
             Focus::Automation => {
@@ -170,6 +176,45 @@ impl App {
                     projects.iter().map(|project| project.name.as_str()),
                     self.selection.project.as_deref(),
                 )
+            }
+            Focus::Branch => {
+                let Loadable::Ready(branches) = &self.branches else {
+                    return false;
+                };
+                let mut items = vec![FilterItem {
+                    label: "All".to_owned(),
+                    choice: FilterChoice::All,
+                }];
+                for branch in branches.iter().filter(|branch| {
+                    self.selection
+                        .project
+                        .as_ref()
+                        .is_none_or(|project| branch.project == *project)
+                }) {
+                    let label = if self.selection.project.is_some() {
+                        branch.branch.clone()
+                    } else {
+                        format!("{} · {}", branch.project, branch.branch)
+                    };
+                    items.push(FilterItem {
+                        label,
+                        choice: FilterChoice::Branch {
+                            project: branch.project.clone(),
+                            token: branch.token.clone(),
+                        },
+                    });
+                }
+                let selected = self
+                    .selection
+                    .git_branch
+                    .as_ref()
+                    .and_then(|token| {
+                        items.iter().position(|item| {
+                            matches!(&item.choice, FilterChoice::Branch { token: value, .. } if value == token)
+                        })
+                    })
+                    .unwrap_or(0);
+                (items, selected)
             }
             Focus::Agent => {
                 let Loadable::Ready(agents) = &self.agents else {
@@ -267,9 +312,18 @@ impl App {
         let focus = popup.focus;
         self.popup = None;
         match (focus, choice) {
-            (Focus::Project, FilterChoice::All) => take_if_some(&mut self.selection.project),
-            (Focus::Project, FilterChoice::Text(value)) => {
-                replace_if_changed(&mut self.selection.project, Some(value))
+            (Focus::Project, FilterChoice::All) => self.clear_project(),
+            (Focus::Project, FilterChoice::Text(value)) => self.replace_project(Some(value)),
+            (Focus::Branch, FilterChoice::All) => self.clear_branch(),
+            (Focus::Branch, FilterChoice::Branch { project, token }) => {
+                let changed = self.selection.project.as_deref() != Some(project.as_str())
+                    || self.selection.git_branch.as_deref() != Some(token.as_str());
+                if changed {
+                    self.selection.project = Some(project);
+                    self.selection.git_branch = Some(token);
+                    self.source_scope_active = false;
+                }
+                changed
             }
             (Focus::Agent, FilterChoice::All) => take_if_some(&mut self.selection.agent),
             (Focus::Agent, FilterChoice::Text(value)) => {
@@ -291,6 +345,9 @@ impl App {
             Focus::Project if matches!(self.projects, Loadable::Failed(_)) => {
                 Some(MetadataKind::Projects)
             }
+            Focus::Branch if matches!(self.branches, Loadable::Failed(_)) => {
+                Some(MetadataKind::Branches)
+            }
             Focus::Agent if matches!(self.agents, Loadable::Failed(_)) => {
                 Some(MetadataKind::Agents)
             }
@@ -304,11 +361,43 @@ impl App {
     pub(crate) fn focused_filter_is_ready(&self) -> bool {
         match self.focus {
             Focus::Project => matches!(self.projects, Loadable::Ready(_)),
+            Focus::Branch => matches!(self.branches, Loadable::Ready(_)),
             Focus::Agent => matches!(self.agents, Loadable::Ready(_)),
             Focus::Machine => matches!(self.machines, Loadable::Ready(_)),
             Focus::Automation => true,
             Focus::Date | Focus::Timeline | Focus::Sessions | Focus::Breakdowns => false,
         }
+    }
+
+    fn replace_project(&mut self, project: Option<String>) -> bool {
+        if self.selection.project == project {
+            return false;
+        }
+        self.selection.project = project;
+        self.selection.git_branch = None;
+        self.source_scope_active = false;
+        true
+    }
+
+    fn clear_project(&mut self) -> bool {
+        let changed =
+            self.selection.project.take().is_some() | self.selection.git_branch.take().is_some();
+        if changed {
+            self.source_scope_active = false;
+        }
+        changed
+    }
+
+    fn clear_branch(&mut self) -> bool {
+        let changed = if self.source_scope_active {
+            self.selection.project.take().is_some() | self.selection.git_branch.take().is_some()
+        } else {
+            self.selection.git_branch.take().is_some()
+        };
+        if changed {
+            self.source_scope_active = false;
+        }
+        changed
     }
 }
 
@@ -333,7 +422,7 @@ fn refresh_project_results(popup: &mut FilterPopup) {
             FilterChoice::Text(_) => {
                 fuzzy_score(&item.label, &popup.query).map(|score| (score, index))
             }
-            FilterChoice::All | FilterChoice::Automation(_) => None,
+            FilterChoice::All | FilterChoice::Branch { .. } | FilterChoice::Automation(_) => None,
         })
         .collect::<Vec<_>>();
     matches.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
