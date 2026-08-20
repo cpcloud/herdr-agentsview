@@ -376,6 +376,34 @@ fn timeline_axis_places_intermediate_clock_ticks() {
 }
 
 #[test]
+fn y_axis_reserves_plot_width_and_keeps_time_axis_aligned() {
+    // If the y-axis is painted over the existing chart width, the first time tick sits under
+    // the labels instead of the data; if the x-axis keeps the old width, its right edge clips.
+    for (width, height, scale) in [(80, 24, "0–7│"), (120, 40, "7 ┤"), (200, 50, "7 ┤")] {
+        let app = ready_app(ColorMode::Monochrome);
+        let text = render::to_text_at(&app, width, height, render_time());
+        let scale_line = text
+            .lines()
+            .find(|line| line.contains(scale))
+            .unwrap_or_else(|| panic!("missing y-axis scale {scale:?}\n{text}"));
+        let scale_end = scale_line.find(scale).unwrap() + scale.len();
+        let plot_start = UnicodeWidthStr::width(&scale_line[..scale_end]);
+        let time_axis = text
+            .lines()
+            .find(|line| line.contains("00:00") && line.contains("12:00"))
+            .unwrap_or_else(|| panic!("missing timeline axis\n{text}"));
+        let first_tick = time_axis.find("00:00").unwrap();
+        let last_tick = time_axis.rfind("00:00").unwrap();
+
+        assert_eq!(UnicodeWidthStr::width(&time_axis[..first_tick]), plot_start);
+        assert_eq!(
+            UnicodeWidthStr::width(&time_axis[..last_tick]) + 5,
+            usize::from(width) - 1
+        );
+    }
+}
+
+#[test]
 fn compact_partial_timeline_marks_its_observed_cutoff() {
     // If the compact chart has only one plot row, the timestamp replaces the cutoff bar
     // instead of labeling it from above.
@@ -406,7 +434,16 @@ fn compact_partial_timeline_marks_its_observed_cutoff() {
 fn partial_timeline_marks_the_future_inside_a_straddling_bucket() {
     // If elapsed bucket count paints each observed bucket in full, a partial final bucket can
     // draw activity beyond effective_end even while the axis names that region as future.
-    let app = app_with_report(activity::report(), ColorMode::Monochrome);
+    let report = activity::report();
+    let total = report
+        .range_end
+        .signed_duration_since(report.range_start)
+        .num_milliseconds();
+    let elapsed = report
+        .effective_end
+        .signed_duration_since(report.range_start)
+        .num_milliseconds();
+    let app = app_with_report(report, ColorMode::Monochrome);
 
     let text = render::to_text_at(&app, 120, 40, render_time());
 
@@ -414,7 +451,27 @@ fn partial_timeline_marks_the_future_inside_a_straddling_bucket() {
         .lines()
         .find(|line| line.matches('┄').count() > 1)
         .unwrap_or_else(|| panic!("missing sub-bucket future region\n{text}"));
-    assert_eq!(future_line.matches('┄').count(), 38, "{future_line}");
+    let cells = future_line.chars().collect::<Vec<_>>();
+    let plot_start = cells
+        .iter()
+        .position(|cell| *cell == '┼')
+        .expect("missing y-axis origin")
+        + 1;
+    let cutoff = cells
+        .windows(2)
+        .position(|pair| pair == ['│', '┄'])
+        .expect("missing cutoff marker before future region");
+    let plot_width = cells.len() - 1 - plot_start;
+    let expected_cutoff =
+        (usize::try_from(elapsed).unwrap() * plot_width).div_ceil(usize::try_from(total).unwrap());
+
+    assert_eq!(cutoff - plot_start, expected_cutoff, "{future_line}");
+    assert!(
+        cells[cutoff + 1..cells.len() - 1]
+            .iter()
+            .all(|cell| *cell == '┄'),
+        "{future_line}"
+    );
 }
 
 #[test]
