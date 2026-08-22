@@ -557,3 +557,16 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
         (!value.is_empty()).then_some(value)
     })
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResumeResponse {
+    #[serde(default)]
+    pub launched: bool,
+    #[serde(default)]
+    pub terminal: Option<String>,
+    pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}

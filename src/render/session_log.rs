@@ -40,6 +40,7 @@ pub(super) fn render(
     if render_notice(buffer, inner, app, palette) {
         return;
     }
+    let inner = render_resume_notice(buffer, inner, app, palette);
     if inner.height == 0 || inner.width == 0 {
         return;
     }
@@ -112,6 +113,31 @@ fn row_height(class: LayoutClass, inner_width: u16) -> u16 {
     } else {
         2
     }
+}
+
+fn render_resume_notice(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) -> Rect {
+    let Some(notice) = app.resume_notice() else {
+        return area;
+    };
+    if area.height == 0 || area.width == 0 {
+        return area;
+    }
+    let style = if app.resume_in_flight() {
+        palette.muted()
+    } else {
+        palette.error()
+    };
+    Paragraph::new(Line::from(Span::styled(
+        clip_with_ellipsis(notice, usize::from(area.width)),
+        style,
+    )))
+    .render(Rect::new(area.x, area.y, area.width, 1), buffer);
+    Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1),
+    )
 }
 
 fn render_notice(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) -> bool {

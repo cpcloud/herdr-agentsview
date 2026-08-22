@@ -47,4 +47,4 @@ Date 2026-08-08 · Project All · Agent All · Machine All · Session All
 │                                                                                                                                                                                                      │
 │                                                                                                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- ↑/↓  select row   Enter  expand / collapse   r  refresh   Esc  activity   o  leave log   ?  keys   q  close dashboard
+ ↑/↓  select row   Enter  resume   r  refresh   Esc  activity   o  leave log   ?  keys   q  close dashboard

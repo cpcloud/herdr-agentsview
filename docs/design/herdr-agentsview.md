@@ -65,9 +65,11 @@ relationship rows can be grouped.
 Each row shows title, project, recency, message count, agent, and machine when
 those fields are present. `display_name` wins over `first_message`; missing
 titles render as Untitled. Parent rows with children use expand markers;
-collapsed children stay off-screen until Enter expands them. `parent_session_id`
-and `relationship_type` are displayed as provided and are not parsed out of
-session ids.
+collapsed children stay off-screen until Right expands them. Enter resumes the
+selected session through `POST /api/v1/sessions/{id}/resume` with
+`command_only: true`, then Herdr splits a pane and runs the returned command
+unparsed. `parent_session_id` and `relationship_type` are displayed as provided
+and are not parsed out of session ids.
 
 The list is scrollable, pages with the opaque `next_cursor`, and has explicit
 empty, loading, and failure copy. Refresh retries the log without discarding a

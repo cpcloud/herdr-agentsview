@@ -34,6 +34,9 @@ pub enum AppCommand {
         query: SessionLogQuery,
         append: bool,
     },
+    ResumeSession {
+        session_id: String,
+    },
     FetchMetadata(MetadataKind),
     Quit,
 }
@@ -119,6 +122,13 @@ pub struct App {
     breakdown_value: BreakdownValue,
     compact_region: CompactRegion,
     color_mode: ColorMode,
+    resume: Option<ResumeState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ResumeState {
+    InFlight { session_id: String },
+    Failed { message: String },
 }
 
 impl App {
@@ -147,6 +157,7 @@ impl App {
             breakdown_value: BreakdownValue::AgentMinutes,
             compact_region: CompactRegion::Sessions,
             color_mode: ColorMode::Color,
+            resume: None,
         }
     }
 

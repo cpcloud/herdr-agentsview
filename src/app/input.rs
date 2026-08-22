@@ -155,7 +155,7 @@ impl App {
             ],
             Focus::SessionLog => vec![
                 hint("↑/↓", "select row", "↑/↓ row"),
-                hint("Enter", "expand / collapse", "Enter expand"),
+                hint("Enter", "resume", "Enter resume"),
             ],
         };
         let retry = self.failed_metadata_for_focus().is_some()
@@ -258,7 +258,7 @@ impl App {
             Focus::SessionLog => match key {
                 InputKey::Up | InputKey::Char('k') => return self.move_session_log(-1),
                 InputKey::Down | InputKey::Char('j') => return self.move_session_log(1),
-                InputKey::Enter => self.toggle_session_log_expand(),
+                InputKey::Enter => return self.begin_session_log_resume(),
                 InputKey::Right | InputKey::Char('l') => self.expand_selected_session_log(),
                 InputKey::Left | InputKey::Char('h') => self.collapse_selected_session_log(),
                 _ => {}

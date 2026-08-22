@@ -59,7 +59,8 @@ pub(super) fn header_spinner(app: &App, now: DateTime<Utc>) -> Option<&'static s
     (matches!(
         app.report_state(),
         ReportState::InitialLoading | ReportState::Refreshing { .. }
-    ) || app.session_log_is_loading())
+    ) || app.session_log_is_loading()
+        || app.resume_in_flight())
     .then(|| braille_spinner(now))
 }
 

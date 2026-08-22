@@ -122,6 +122,29 @@ async fn serve(
     let mut fields = request_line.split_whitespace();
     let method = fields.next().context("request has no method")?;
     let target = fields.next().context("request has no target")?;
+    let url =
+        Url::parse(&format!("http://127.0.0.1{target}")).context("parse fake request target")?;
+    if method == "POST" {
+        if let Some(session_id) = resume_session_id(url.path()) {
+            let body = serde_json::json!({
+                "launched": false,
+                "command": format!("echo resumed {session_id}"),
+                "cwd": "/tmp",
+            });
+            return write_json_response(
+                &mut stream,
+                "200 OK",
+                &serde_json::to_string(&body).context("encode fake resume")?,
+            )
+            .await;
+        }
+        return write_json_response(
+            &mut stream,
+            "405 Method Not Allowed",
+            r#"{"error":"method not allowed"}"#,
+        )
+        .await;
+    }
     if method != "GET" {
         return write_json_response(
             &mut stream,
@@ -131,8 +154,6 @@ async fn serve(
         .await;
     }
 
-    let url =
-        Url::parse(&format!("http://127.0.0.1{target}")).context("parse fake request target")?;
     let query = url.query_pairs().into_owned().collect::<BTreeMap<_, _>>();
     let session_report_id = session_report_id(url.path());
     let (status, body) = match url.path() {
@@ -199,6 +220,12 @@ async fn serve(
         _ => ("404 Not Found", r#"{"error":"route not found"}"#.to_owned()),
     };
     write_json_response(&mut stream, status, &body).await
+}
+
+fn resume_session_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/v1/sessions/")
+        .and_then(|value| value.strip_suffix("/resume"))
+        .filter(|value| !value.is_empty() && !value.contains('/'))
 }
 
 fn session_report_id(path: &str) -> Option<&str> {

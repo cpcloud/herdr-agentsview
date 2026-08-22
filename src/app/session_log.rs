@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::api::ApiError;
 use crate::wire::{Automation, SessionLogEntry, SessionLogPage, SessionLogQuery};
 
-use super::{App, AppCommand, Focus, View};
+use super::{App, AppCommand, Focus, ResumeState, View};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionLogState {
@@ -223,6 +223,7 @@ impl App {
         self.view = View::Activity;
         self.focus = self.activity_focus;
         self.popup = None;
+        self.resume = None;
     }
 
     pub(crate) fn begin_session_log_load(&mut self, append: bool) -> Option<AppCommand> {
@@ -273,19 +274,51 @@ impl App {
         }
     }
 
-    pub(crate) fn toggle_session_log_expand(&mut self) {
-        self.set_selected_session_log_expanded(None);
+    pub(crate) fn begin_session_log_resume(&mut self) -> Option<AppCommand> {
+        if matches!(self.resume, Some(ResumeState::InFlight { .. })) {
+            return None;
+        }
+        let session_id = self
+            .displayed_session_log()
+            .get(self.session_log_cursor())
+            .map(|row| row.entry.id.clone())
+            .filter(|session_id| !session_id.trim().is_empty())?;
+        self.resume = Some(ResumeState::InFlight {
+            session_id: session_id.clone(),
+        });
+        Some(AppCommand::ResumeSession { session_id })
+    }
+
+    pub fn apply_resume(&mut self, result: Result<(), ApiError>) {
+        self.resume = match result {
+            Ok(()) => None,
+            Err(error) => Some(ResumeState::Failed {
+                message: error.message,
+            }),
+        };
+    }
+
+    pub fn resume_notice(&self) -> Option<&str> {
+        match &self.resume {
+            Some(ResumeState::InFlight { .. }) => Some("Resuming session"),
+            Some(ResumeState::Failed { message }) => Some(message.as_str()),
+            None => None,
+        }
+    }
+
+    pub(crate) fn resume_in_flight(&self) -> bool {
+        matches!(self.resume, Some(ResumeState::InFlight { .. }))
     }
 
     pub(crate) fn collapse_selected_session_log(&mut self) {
-        self.set_selected_session_log_expanded(Some(false));
+        self.set_selected_session_log_expanded(false);
     }
 
     pub(crate) fn expand_selected_session_log(&mut self) {
-        self.set_selected_session_log_expanded(Some(true));
+        self.set_selected_session_log_expanded(true);
     }
 
-    fn set_selected_session_log_expanded(&mut self, expand: Option<bool>) {
+    fn set_selected_session_log_expanded(&mut self, should_expand: bool) {
         let selected = self
             .displayed_session_log()
             .get(self.session_log_cursor())
@@ -294,7 +327,6 @@ impl App {
         let Some((selected_id, is_expanded)) = selected else {
             return;
         };
-        let should_expand = expand.unwrap_or(!is_expanded);
         if should_expand == is_expanded {
             return;
         }

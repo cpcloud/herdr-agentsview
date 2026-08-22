@@ -165,3 +165,43 @@ fn open_times_out_and_terminates_a_hung_herdr_process() {
 fn endpoint_accepts_connections(endpoint: SocketAddr) -> bool {
     TcpStream::connect_timeout(&endpoint, Duration::from_millis(50)).is_ok()
 }
+
+#[test]
+fn resume_splits_the_invoking_pane_and_runs_the_api_command_unparsed() {
+    // If resume reuses plugin pane open or rewrites the returned command, the native agent
+    // starts in the dashboard pane or with flags AgentsView did not produce.
+    let fake = FakeHerdr::new();
+    let command = "cd /repo && claude --resume abc-123";
+
+    herdr_agentsview::herdr::resume_with(
+        &fake.executable,
+        "workspace-a:p3",
+        &fake.root.path().join("fake-herdr.sock"),
+        command,
+        Some("/repo"),
+    )
+    .expect("resume in a Herdr pane");
+
+    assert_eq!(
+        fake.calls(),
+        vec![
+            vec![
+                "pane".to_owned(),
+                "split".to_owned(),
+                "--pane".to_owned(),
+                "workspace-a:p3".to_owned(),
+                "--direction".to_owned(),
+                "right".to_owned(),
+                "--cwd".to_owned(),
+                "/repo".to_owned(),
+                "--focus".to_owned(),
+            ],
+            vec![
+                "pane".to_owned(),
+                "run".to_owned(),
+                "workspace-a:p4".to_owned(),
+                command.to_owned(),
+            ],
+        ]
+    );
+}

@@ -21,13 +21,14 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::api::{ActivityClient, ApiError};
+use crate::api::{ActivityClient, ApiError, ApiErrorKind};
 use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState, SessionPageRequest};
 use crate::config::PluginConfig;
-use crate::render::{self, TerminalCapabilities};
+use crate::render::TerminalCapabilities;
 use crate::wire::{
     AgentInfo, ProjectInfo, Report, ReportSelection, SessionLogPage, SessionLogQuery,
 };
+use crate::{herdr, render};
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const STATUS_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
@@ -66,6 +67,10 @@ enum Completion {
         result: Result<SessionLogPage, ApiError>,
         append: bool,
     },
+    Resume {
+        token: u64,
+        result: Result<(), ApiError>,
+    },
 }
 
 pub struct Runtime {
@@ -78,6 +83,7 @@ pub struct Runtime {
     agents: Option<OwnedTask>,
     machines: Option<OwnedTask>,
     session_log: Option<OwnedTask>,
+    resume: Option<OwnedTask>,
     task_token: u64,
     report_timeout_configured: bool,
     report_wait_intervals: u32,
@@ -110,6 +116,7 @@ impl Runtime {
             agents: None,
             machines: None,
             session_log: None,
+            resume: None,
             task_token: 0,
             report_timeout_configured: config.request_timeout.is_some(),
             report_wait_intervals: 0,
@@ -139,6 +146,7 @@ impl Runtime {
             AppCommand::FetchSessionLog { query, append } => {
                 self.spawn_session_log(query, append);
             }
+            AppCommand::ResumeSession { session_id } => self.spawn_resume(session_id),
             AppCommand::Quit => return true,
         }
         false
@@ -250,6 +258,26 @@ impl Runtime {
         self.session_log = Some(OwnedTask { token, handle });
     }
 
+    fn spawn_resume(&mut self, session_id: String) {
+        abort_task(&mut self.resume);
+        let token = self.next_task_token();
+        let client = self.client.clone();
+        let sender = self.sender.clone();
+        let handle = self.executor.spawn(async move {
+            let result = match client.resume_session(&session_id).await {
+                Ok(response) => herdr::resume(&response.command, response.cwd.as_deref())
+                    .await
+                    .map_err(|error| ApiError {
+                        kind: ApiErrorKind::Network,
+                        message: format!("{error:#}"),
+                    }),
+                Err(error) => Err(error),
+            };
+            let _ = sender.send(Completion::Resume { token, result });
+        });
+        self.resume = Some(OwnedTask { token, handle });
+    }
+
     fn apply_completion(&mut self, app: &mut App, completion: Completion) -> bool {
         match completion {
             Completion::Report {
@@ -304,6 +332,12 @@ impl Runtime {
                     return false;
                 }
                 app.apply_session_log(result, append);
+            }
+            Completion::Resume { token, result } => {
+                if !take_current(&mut self.resume, token) {
+                    return false;
+                }
+                app.apply_resume(result);
             }
         }
         true
@@ -360,6 +394,7 @@ impl Drop for Runtime {
         abort_task(&mut self.agents);
         abort_task(&mut self.machines);
         abort_task(&mut self.session_log);
+        abort_task(&mut self.resume);
     }
 }
 

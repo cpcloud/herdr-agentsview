@@ -123,7 +123,7 @@ fn render_help(buffer: &mut Buffer, area: Rect, palette: Palette) {
         HelpRow::Pair(("s", "sessions"), ("b", "breakdowns")),
         HelpRow::Heading("SESSION LOG"),
         HelpRow::Pair(("o", "open / leave"), ("Esc", "back to activity")),
-        HelpRow::Pair(("Enter", "expand / collapse"), ("↑/↓", "move selection")),
+        HelpRow::Pair(("Enter", "resume session"), ("←/→", "expand / collapse")),
         HelpRow::Blank,
         HelpRow::Heading("GENERAL"),
         HelpRow::Pair(("r", "refresh / retry"), ("Esc", "cancel / close")),

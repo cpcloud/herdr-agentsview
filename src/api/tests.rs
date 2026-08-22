@@ -196,6 +196,57 @@ async fn session_log_invalid_json_is_a_protocol_error() {
 }
 
 #[tokio::test]
+async fn resume_posts_command_only_true_to_the_session_resume_path() {
+    // If resume GETs the list, omits command_only, or invents a CLI template, Herdr launches
+    // the wrong thing and AgentsView cannot own native resume flags.
+    let mut server = RecordingServer::start(ResponsePlan::json(
+        r#"{"launched":false,"command":"cd /repo && claude --resume abc-123","cwd":"/repo"}"#,
+    ))
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let response = client.resume_session("session-root-alpha").await.unwrap();
+    let request = server.take_request().await;
+
+    assert_eq!(response.command, "cd /repo && claude --resume abc-123");
+    assert_eq!(response.cwd.as_deref(), Some("/repo"));
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/api/v1/sessions/session-root-alpha/resume");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&request.body).unwrap(),
+        serde_json::json!({ "command_only": true })
+    );
+}
+
+#[tokio::test]
+async fn resume_rejects_an_empty_command_without_inventing_one() {
+    // If an empty resume command is treated as success, the plugin would have to guess a
+    // native agent invocation from the session id.
+    let mut server =
+        RecordingServer::start(ResponsePlan::json(r#"{"launched":false,"command":""}"#)).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client
+        .resume_session("session-root-alpha")
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("resume command"));
+    server.take_request().await;
+}
+
+#[tokio::test]
 async fn bearer_authentication_is_sent_only_over_verified_tls() {
     // If the client omits the bearer header or weakens TLS verification, authenticated
     // deployments either fail closed or disclose runtime credentials.

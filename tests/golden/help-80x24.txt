@@ -13,7 +13,7 @@ Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 └────│ s  sessions                       b  breakdowns                    │────┘
 Secti│SESSION LOG                                                         │
 ┌ Ses│ o  open / leave                   Esc  back to activity            │────┐
-│  Se│ Enter  expand / collapse          ↑/↓  move selection              │    │
+│  Se│ Enter  resume session             ←/→  expand / collapse           │    │
 │  Ru│                                                                    │    │
 │  Re│GENERAL                                                             │    │
 │  Im│ r  refresh / retry                Esc  cancel / close              │    │

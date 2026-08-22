@@ -1017,7 +1017,7 @@ fn session_log_render_shows_identity_and_keeps_children_collapsed() {
     assert_width(&text, 120);
 
     let mut expanded = session_log_app(ColorMode::Monochrome);
-    expanded.handle_input(InputKey::Enter, activity::selection().date);
+    expanded.handle_input(InputKey::Right, activity::selection().date);
     let expanded_text = render::to_text_at(&expanded, 120, 40, render_time());
     assert!(expanded_text.contains("Session log (2)"), "{expanded_text}");
     assert!(!expanded_text.contains("of 2"), "{expanded_text}");
@@ -1025,6 +1025,23 @@ fn session_log_render_shows_identity_and_keeps_children_collapsed() {
         expanded_text.contains("Read and perform the complete adversarial review"),
         "{expanded_text}"
     );
+}
+
+#[test]
+fn session_log_resume_error_renders_over_the_list() {
+    // If resume failure replaces the compact list, the operator loses the row they selected
+    // and cannot retry without reloading.
+    let mut app = session_log_app(ColorMode::Monochrome);
+    app.handle_input(InputKey::Enter, activity::selection().date);
+    app.apply_resume(Err(ApiError {
+        kind: ApiErrorKind::Protocol,
+        message: "cannot resume remote session".to_owned(),
+    }));
+
+    let text = render::to_text_at(&app, 120, 40, render_time());
+    assert!(text.contains("cannot resume remote session"), "{text}");
+    assert!(text.contains("Audit every Codex session"), "{text}");
+    assert!(text.contains("Untitled"), "{text}");
 }
 
 #[test]

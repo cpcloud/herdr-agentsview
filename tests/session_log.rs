@@ -92,12 +92,54 @@ fn session_log_hides_children_until_expanded() {
     assert!(!rows[0].expanded);
     assert_eq!(rows[1].entry.id, "session-untitled");
 
-    app.handle_input(InputKey::Enter, today());
+    app.handle_input(InputKey::Right, today());
     let rows = app.displayed_session_log();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[1].entry.id, "session-child-alpha");
     assert_eq!(rows[1].depth, 1);
     assert_eq!(rows[1].relationship_marker(), Some("subagent"));
+}
+
+#[test]
+fn session_log_enter_resumes_the_selected_session() {
+    // If Enter still toggles the tree, the operator cannot reopen the selected session from
+    // the compact list the way the AgentsView resume menu does.
+    let mut app = ready_app();
+    app.handle_input(InputKey::Char('o'), today());
+    app.apply_session_log(Ok(session_page()), false);
+
+    assert_eq!(
+        app.handle_input(InputKey::Enter, today()),
+        Some(AppCommand::ResumeSession {
+            session_id: "session-root-alpha".to_owned(),
+        })
+    );
+    assert_eq!(app.displayed_session_log().len(), 2);
+    assert!(!app.displayed_session_log()[0].expanded);
+}
+
+#[test]
+fn session_log_resume_error_keeps_visible_rows() {
+    // If a failed resume replaces the list, the operator loses the selection they were trying
+    // to reopen and has to reload before retrying.
+    let mut app = ready_app();
+    app.handle_input(InputKey::Char('o'), today());
+    app.apply_session_log(Ok(session_page()), false);
+    app.handle_input(InputKey::Enter, today());
+
+    app.apply_resume(Err(ApiError {
+        kind: ApiErrorKind::Protocol,
+        message: "cannot resume remote session".to_owned(),
+    }));
+
+    assert_eq!(app.displayed_session_log().len(), 2);
+    assert_eq!(
+        app.displayed_session_log()[0].entry.id,
+        "session-root-alpha"
+    );
+    assert!(app
+        .resume_notice()
+        .is_some_and(|notice| notice.contains("cannot resume remote session")));
 }
 
 #[test]

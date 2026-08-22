@@ -14,7 +14,12 @@ use std::time::Duration;
 fn main() {
     let root = env::var_os("FAKE_HERDR_DIR")
         .map(PathBuf::from)
-        .expect("FAKE_HERDR_DIR");
+        .or_else(|| {
+            env::var_os("HERDR_SOCKET_PATH")
+                .map(PathBuf::from)
+                .and_then(|path| path.parent().map(PathBuf::from))
+        })
+        .expect("FAKE_HERDR_DIR or HERDR_SOCKET_PATH");
     let call = env::args().skip(1).collect::<Vec<_>>().join("\t");
     writeln!(
         OpenOptions::new()
@@ -25,6 +30,11 @@ fn main() {
         "{call}"
     )
     .expect("record fake Herdr call");
+
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments.windows(2).any(|window| window == ["pane", "split"]) {
+        println!(r#"{{"result":{{"pane":{{"pane_id":"workspace-a:p4"}}}}}}"#);
+    }
 
     match env::var("FAKE_HERDR_MODE").as_deref().unwrap_or("success") {
         "failure" => {
