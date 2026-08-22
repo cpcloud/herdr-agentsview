@@ -37,4 +37,4 @@ Date 2026-08-08 · Project unavailable · Agent All · Machine All · Session Al
 │                                       │                                      │                                       │
 │                                       │                                      │                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- ←/→  day   Backspace  today   Tab  next section   r  refresh   ?  keys   q  close dashboard
+ ←/→  day   Backspace  today   Tab  next section   r  refresh   o  session log   ?  keys   q  close dashboard

@@ -455,7 +455,7 @@ mod tests {
         app.set_focus(Focus::Sessions);
         for (class, width, expected) in [
             (LayoutClass::Compact, 80, "q  quit"),
-            (LayoutClass::Medium, 120, "q  close dashboard"),
+            (LayoutClass::Medium, 120, "q  quit"),
             (LayoutClass::Wide, 200, "q  close dashboard"),
         ] {
             let area = Rect::new(0, 0, width, 1);

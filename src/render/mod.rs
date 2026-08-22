@@ -6,6 +6,7 @@ mod breakdowns;
 mod chrome;
 mod layout;
 mod popups;
+mod session_log;
 mod sessions;
 mod status;
 mod style;
@@ -73,6 +74,9 @@ fn draw_frame_plan(buffer: &mut Buffer, app: &App, plan: &FramePlan, now: DateTi
     }
     if let Some(breakdowns) = plan.breakdowns() {
         breakdowns::render(buffer, breakdowns, app, plan.class(), palette);
+    }
+    if let Some(session_log) = plan.session_log() {
+        session_log::render(buffer, session_log, app, plan.class(), now, palette);
     }
     if let Some(footer) = plan.footer() {
         chrome::render_footer(buffer, footer, app, plan.class(), palette);

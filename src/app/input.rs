@@ -52,11 +52,16 @@ impl App {
         if self.popup.is_some() {
             return self.handle_popup_input(key);
         }
+        if self.session_log_open() && matches!(key, InputKey::Escape) {
+            self.close_session_log();
+            return None;
+        }
 
         match key {
             InputKey::Tab => self.move_focus(1),
             InputKey::BackTab => self.move_focus(-1),
             InputKey::Char('?') => self.help_open = true,
+            InputKey::Char('o') => return self.open_or_toggle_session_log(),
             InputKey::Char('r') => return self.refresh_or_retry(),
             InputKey::Backspace => {
                 if self.clear_focused_filter(today) {
@@ -68,17 +73,23 @@ impl App {
                     return self.foreground_command();
                 }
             }
-            InputKey::Char('s') => {
+            InputKey::Char('s') if !self.session_log_open() => {
                 self.compact_region = CompactRegion::Sessions;
                 self.focus = Focus::Sessions;
             }
-            InputKey::Char('b') => {
+            InputKey::Char('b') if !self.session_log_open() => {
                 self.compact_region = CompactRegion::Breakdown;
                 self.focus = Focus::Breakdowns;
             }
-            InputKey::Char('p') => self.select_compact_breakdown(BreakdownCategory::Project),
-            InputKey::Char('m') => self.select_compact_breakdown(BreakdownCategory::Model),
-            InputKey::Char('a') => self.select_compact_breakdown(BreakdownCategory::Agent),
+            InputKey::Char('p') if !self.session_log_open() => {
+                self.select_compact_breakdown(BreakdownCategory::Project);
+            }
+            InputKey::Char('m') if !self.session_log_open() => {
+                self.select_compact_breakdown(BreakdownCategory::Model);
+            }
+            InputKey::Char('a') if !self.session_log_open() => {
+                self.select_compact_breakdown(BreakdownCategory::Agent);
+            }
             _ => return self.handle_focused_input(key, today),
         }
         None
@@ -142,20 +153,32 @@ impl App {
                 hint("←/→", "category", "←/→ category"),
                 hint("v", "cost/time", "v cost/time"),
             ],
+            Focus::SessionLog => vec![
+                hint("↑/↓", "select row", "↑/↓ row"),
+                hint("Enter", "expand / collapse", "Enter expand"),
+            ],
         };
         let retry = self.failed_metadata_for_focus().is_some()
             || matches!(
                 self.report_state(),
                 ReportState::Failed(_) | ReportState::Stale { .. }
             );
-        if self.focus != Focus::Date {
+        if self.focus != Focus::Date && !self.session_log_open() {
             hints.push(hint("t", "today", "t today"));
         }
-        hints.push(hint("Tab", "next section", "Tab next"));
+        if !self.session_log_open() {
+            hints.push(hint("Tab", "next section", "Tab next"));
+        }
         if retry {
             hints.push(hint("r", "retry", "r retry"));
         } else if !self.has_in_flight_report() {
             hints.push(hint("r", "refresh", "r refresh"));
+        }
+        if self.session_log_open() {
+            hints.push(hint("Esc", "activity", "Esc activity"));
+            hints.push(hint("o", "leave log", "o leave"));
+        } else {
+            hints.push(hint("o", "session log", "o log"));
         }
         hints.push(hint("?", "keys", "? keys"));
         hints.push(hint("q", "close dashboard", "q quit"));
@@ -232,6 +255,14 @@ impl App {
                 InputKey::Enter => self.toggle_sort_direction(),
                 _ => {}
             },
+            Focus::SessionLog => match key {
+                InputKey::Up | InputKey::Char('k') => return self.move_session_log(-1),
+                InputKey::Down | InputKey::Char('j') => return self.move_session_log(1),
+                InputKey::Enter => self.toggle_session_log_expand(),
+                InputKey::Right | InputKey::Char('l') => self.expand_selected_session_log(),
+                InputKey::Left | InputKey::Char('h') => self.collapse_selected_session_log(),
+                _ => {}
+            },
             Focus::Breakdowns => match key {
                 InputKey::Left | InputKey::Char('h') => self.move_breakdown(-1),
                 InputKey::Right | InputKey::Char('l') => self.move_breakdown(1),
@@ -245,6 +276,14 @@ impl App {
     fn refresh_or_retry(&mut self) -> Option<AppCommand> {
         if let Some(kind) = self.failed_metadata_for_focus() {
             return Some(self.retry_metadata(kind));
+        }
+        if self.session_log_open()
+            && matches!(
+                self.session_log_state(),
+                crate::app::SessionLogState::Failed(_)
+            )
+        {
+            return self.begin_session_log_load(false);
         }
         if self.has_in_flight_report() {
             return None;

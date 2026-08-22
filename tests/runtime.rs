@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
-use herdr_agentsview::app::{App, Focus, InputKey, Loadable, MetadataKind, ReportState};
+use herdr_agentsview::app::{
+    App, AppCommand, Focus, InputKey, Loadable, MetadataKind, ReportState, SessionLogState, View,
+};
 use herdr_agentsview::config::PluginConfig;
 use herdr_agentsview::tui::Runtime;
 use herdr_agentsview::wire::ReportSelection;
@@ -21,11 +23,13 @@ const REPORT: &str = include_str!("fixtures/report-v6.json");
 const PROJECTS: &str = r#"{"projects":[{"name":"project-alpha","session_count":2}]}"#;
 const AGENTS: &str = r#"{"agents":[{"name":"codex","session_count":2}]}"#;
 const MACHINES: &str = r#"{"machines":["machine-alpha"]}"#;
+const SESSIONS: &str = include_str!("fixtures/sessions.json");
 
 #[derive(Clone, Copy)]
 enum Route {
     Report(usize),
-    Sessions,
+    SessionPage,
+    SessionLog,
     Projects(usize),
     Agents,
     Machines,
@@ -140,7 +144,7 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         .to_owned();
     state.requests.lock().unwrap().push(path.clone());
     let route = if path.starts_with("/api/v1/activity/report/") && path.contains("/sessions") {
-        Route::Sessions
+        Route::SessionPage
     } else if path.starts_with("/api/v1/activity/report") {
         Route::Report(state.report_count.fetch_add(1, Ordering::SeqCst) + 1)
     } else if path.starts_with("/api/v1/projects") {
@@ -149,6 +153,8 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         Route::Agents
     } else if path.starts_with("/api/v1/machines") {
         Route::Machines
+    } else if path.starts_with("/api/v1/sessions") {
+        Route::SessionLog
     } else {
         panic!("unexpected request path {path}");
     };
@@ -174,7 +180,7 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
             "temporarily unavailable".to_owned(),
         ),
         Route::Report(ordinal) => ("200 OK", report_for_path(&path, ordinal)),
-        Route::Sessions => ("200 OK", session_page_for_path(&path)),
+        Route::SessionPage => ("200 OK", session_page_for_path(&path)),
         Route::Projects(1) if state.fail_first_projects.load(Ordering::SeqCst) => (
             "503 Service Unavailable",
             "temporarily unavailable".to_owned(),
@@ -182,6 +188,7 @@ async fn serve_request(mut stream: TcpStream, state: Arc<ServerState>) {
         Route::Projects(_) => ("200 OK", PROJECTS.to_owned()),
         Route::Agents => ("200 OK", AGENTS.to_owned()),
         Route::Machines => ("200 OK", MACHINES.to_owned()),
+        Route::SessionLog => ("200 OK", SESSIONS.to_owned()),
     };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -551,4 +558,45 @@ async fn failed_metadata_can_be_retried_independently() {
     })
     .await;
     assert!(matches!(app.report_state(), ReportState::Ready { .. }));
+}
+
+#[tokio::test]
+async fn opening_the_session_log_fetches_the_list_without_dropping_activity() {
+    // If the log reuses the Activity report rows, relationship markers and list-only fields
+    // never appear; if it cancels the report, leaving the log has nothing to return to.
+    let server = RecordingServer::start().await;
+    let config = server.config(Duration::from_secs(60));
+    let mut app = app(&config, NaiveDate::from_ymd_opt(2026, 8, 8).unwrap());
+    let mut runtime = Runtime::new(&config).unwrap();
+    runtime.start(&mut app);
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.report_state(), ReportState::Ready { .. })
+    })
+    .await;
+
+    let command = app
+        .handle_input(
+            InputKey::Char('o'),
+            NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
+        )
+        .expect("opening the log should request the session list");
+    assert!(matches!(
+        command,
+        AppCommand::FetchSessionLog { append: false, .. }
+    ));
+    runtime.dispatch(command);
+    wait_until(|| {
+        runtime.drain_events(&mut app);
+        matches!(app.session_log_state(), SessionLogState::Ready(_))
+    })
+    .await;
+
+    assert_eq!(app.view(), View::SessionLog);
+    assert!(app.report().is_some());
+    assert_eq!(app.displayed_session_log().len(), 2);
+    assert!(server
+        .paths()
+        .iter()
+        .any(|path| path.starts_with("/api/v1/sessions?")));
 }

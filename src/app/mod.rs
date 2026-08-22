@@ -4,6 +4,7 @@
 
 mod filters;
 mod input;
+mod session_log;
 mod sessions;
 
 use std::collections::BTreeMap;
@@ -12,11 +13,14 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::api::{ApiError, ApiErrorKind, SessionFetch};
-use crate::wire::{AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection, SessionRow};
+use crate::wire::{
+    AgentInfo, KeyMinutes, ProjectInfo, Report, ReportSelection, SessionLogQuery, SessionRow,
+};
 
 pub(crate) use filters::PopupQueryEdit;
 pub use filters::{CompactRegion, FilterPopup, Focus, MetadataKind};
 pub use input::{InputKey, KeyHint};
+pub use session_log::{SessionLogRow, SessionLogState};
 pub use sessions::{SessionSortColumn, SortDirection};
 
 use sessions::SessionState;
@@ -26,6 +30,10 @@ pub enum AppCommand {
     FetchReport(ReportSelection),
     FetchSessionPage(SessionPageRequest),
     CancelSessionPage,
+    FetchSessionLog {
+        query: SessionLogQuery,
+        append: bool,
+    },
     FetchMetadata(MetadataKind),
     Quit,
 }
@@ -34,6 +42,12 @@ pub enum AppCommand {
 pub struct SessionPageRequest {
     pub report_id: String,
     pub bucket: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum View {
+    Activity,
+    SessionLog,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,8 +103,11 @@ pub struct App {
     agents: Loadable<Vec<AgentInfo>>,
     machines: Loadable<Vec<String>>,
     focus: Focus,
+    activity_focus: Focus,
     popup: Option<FilterPopup>,
     help_open: bool,
+    view: View,
+    session_log: SessionLogState,
     sessions: SessionState,
     session_pages_report_id: Option<String>,
     session_pages: BTreeMap<usize, Vec<SessionRow>>,
@@ -114,8 +131,11 @@ impl App {
             agents: Loadable::Loading,
             machines: Loadable::Loading,
             focus: Focus::Date,
+            activity_focus: Focus::Date,
             popup: None,
             help_open: false,
+            view: View::Activity,
+            session_log: SessionLogState::Inactive,
             sessions: SessionState::default(),
             session_pages_report_id: None,
             session_pages: BTreeMap::new(),
@@ -162,6 +182,7 @@ impl App {
         self.timeline_inspection_active = false;
         self.sessions.reset_position();
         self.clear_session_pages();
+        self.invalidate_session_log();
         self.selection.clone()
     }
 

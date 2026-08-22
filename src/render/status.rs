@@ -56,10 +56,10 @@ pub(super) fn header_status(app: &App, now: DateTime<Utc>) -> String {
 }
 
 pub(super) fn header_spinner(app: &App, now: DateTime<Utc>) -> Option<&'static str> {
-    matches!(
+    (matches!(
         app.report_state(),
         ReportState::InitialLoading | ReportState::Refreshing { .. }
-    )
+    ) || app.session_log_is_loading())
     .then(|| braille_spinner(now))
 }
 

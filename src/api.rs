@@ -19,7 +19,8 @@ use url::Url;
 use crate::config::{validate_base_url, PluginConfig};
 use crate::wire::{
     AgentInfo, AgentsResponse, MachinesResponse, ProjectInfo, ProjectsResponse, Report,
-    ReportSelection, SessionPage, SessionRow, ACTIVITY_SCHEMA_VERSION,
+    ReportSelection, SessionLogPage, SessionLogQuery, SessionPage, SessionRow,
+    ACTIVITY_SCHEMA_VERSION,
 };
 
 const ERROR_EXCERPT_CHARS: usize = 160;
@@ -142,6 +143,15 @@ impl ActivityClient {
         serde_json::from_slice::<MachinesResponse>(&body)
             .map(MachinesResponse::into_machines)
             .map_err(|_| ApiError::protocol("AgentsView returned invalid machines metadata"))
+    }
+
+    pub async fn fetch_session_log(
+        &self,
+        query: &SessionLogQuery,
+    ) -> Result<SessionLogPage, ApiError> {
+        let body = self.get("api/v1/sessions", &query.query_pairs()).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| ApiError::protocol("AgentsView returned invalid JSON for the session log"))
     }
 
     async fn get(&self, path: &str, query: &[(&'static str, String)]) -> Result<Vec<u8>, ApiError> {
@@ -306,18 +316,14 @@ impl ActivityClient {
             .is_some_and(|length| length > body_limit as u64)
         {
             return if status.is_success() {
-                Err(ApiError::protocol(
-                    "AgentsView response body is too large for the Activity dashboard",
-                ))
+                Err(ApiError::protocol("AgentsView response body is too large"))
             } else {
                 Err(ApiError::from_status(status, &[], authenticated))
             };
         }
         let body = read_bounded_body(response, body_limit).await?;
         if body.truncated && status.is_success() {
-            return Err(ApiError::protocol(
-                "AgentsView response body is too large for the Activity dashboard",
-            ));
+            return Err(ApiError::protocol("AgentsView response body is too large"));
         }
         if !status.is_success() {
             return Err(ApiError::from_status(status, &body.bytes, authenticated));

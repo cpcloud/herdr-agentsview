@@ -21,4 +21,4 @@ Sections:  s  Sessions   b  Breakdown   p/m/a  category
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
- ←/→  day  Bksp  today  Tab  next  r  refresh  ?  keys  q  quit
+ ←/→  day  Bksp  today  Tab  next  r  refresh  o  log  ?  keys  q  quit

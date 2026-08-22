@@ -17,9 +17,10 @@ changing its visibility.
 
 ## Product Boundary
 
-Only the Activity view is included. The plugin does not expose or reserve
-navigation for Sessions, Usage, Trends, Pinned, Insights, Trash, Recent Edits,
-Data, import, settings, help, or global search.
+The plugin includes the Activity dashboard and a terminal session log. It does
+not expose or reserve navigation for Usage, Trends, Pinned, Insights, Trash,
+Recent Edits, Data, import, settings, or global search. Session transcripts and
+per-session detail payloads stay out of this surface.
 
 The plugin consumes the existing AgentsView REST API. It does not change
 AgentsView, read its database, launch its server, shell out to its binary, or
@@ -53,12 +54,32 @@ Project, model, and agent breakdowns switch between agent time and cost. Large
 values use compact decimal suffixes implemented locally, without a dependency
 whose only purpose is number formatting.
 
+## Session Log
+
+`o` replaces the dashboard body with a compact session list from
+`GET /api/v1/sessions`. Esc or `o` returns to Activity and restores the previous
+focus. Header date, project, agent, machine, and automation filters stay visible
+and map onto documented list query parameters, including `include_children` so
+relationship rows can be grouped.
+
+Each row shows title, project, recency, message count, agent, and machine when
+those fields are present. `display_name` wins over `first_message`; missing
+titles render as Untitled. Parent rows with children use expand markers;
+collapsed children stay off-screen until Enter expands them. `parent_session_id`
+and `relationship_type` are displayed as provided and are not parsed out of
+session ids.
+
+The list is scrollable, pages with the opaque `next_cursor`, and has explicit
+empty, loading, and failure copy. Refresh retries the log without discarding a
+good Activity report.
+
 ## Interaction And Layout
 
 The interface is keyboard-first. Focus uses background highlighting instead of
 text chevrons. Selector popups open next to their controls, and the project
-selector supports fuzzy search. Key hints use compact light-background pills;
-the help overlay describes user actions rather than internal regions or panes.
+selector supports fuzzy search. `o` opens the session log; Esc returns to
+Activity. Key hints use compact light-background pills; the help overlay
+describes user actions rather than internal regions or panes.
 
 Loading uses a single animated Braille spinner beside the `AgentsView` title.
 Individual panels use quiet pending copy without repeating the spinner or the

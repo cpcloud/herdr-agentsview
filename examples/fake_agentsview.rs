@@ -14,7 +14,9 @@ use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use clap::Parser;
-use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report, SessionRow};
+use herdr_agentsview::wire::{
+    AgentInfo, Bucket, Money, ProjectInfo, Report, SessionLogPage, SessionRow,
+};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -24,6 +26,7 @@ const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v6.json")
 const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v6.json");
 const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v6.json");
 const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v6.json");
+const SESSIONS: &str = include_str!("../tests/fixtures/sessions.json");
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 #[derive(Parser)]
@@ -189,6 +192,10 @@ async fn serve(
             })
             .context("encode fake machine metadata")?,
         ),
+        "/api/v1/sessions" => (
+            "200 OK",
+            session_log_body(&query).context("encode fake session log")?,
+        ),
         _ => ("404 Not Found", r#"{"error":"route not found"}"#.to_owned()),
     };
     write_json_response(&mut stream, status, &body).await
@@ -341,6 +348,35 @@ fn scenario_for_query(query: &BTreeMap<String, String>) -> ReportScenario {
     } else {
         ReportScenario::Empty
     }
+}
+
+fn session_log_body(query: &BTreeMap<String, String>) -> anyhow::Result<String> {
+    let mut page: SessionLogPage =
+        serde_json::from_str(SESSIONS).context("decode committed session log fixture")?;
+    if let Some(project) = query.get("project") {
+        page.sessions.retain(|session| session.project == *project);
+    }
+    if let Some(agent) = query.get("agent") {
+        page.sessions.retain(|session| session.agent == *agent);
+    }
+    if let Some(machine) = query.get("machine") {
+        page.sessions.retain(|session| session.machine == *machine);
+    }
+    if query.get("include_automated").map(String::as_str) != Some("true") {
+        page.sessions.retain(|session| !session.is_automated);
+    }
+    page.total = page
+        .sessions
+        .iter()
+        .filter(|session| {
+            session
+                .parent_session_id
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
+        })
+        .count();
+    serde_json::to_string(&page).context("encode filtered session log")
 }
 
 fn align_report_date(

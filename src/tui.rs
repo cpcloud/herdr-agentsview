@@ -25,7 +25,9 @@ use crate::api::{ActivityClient, ApiError};
 use crate::app::{App, AppCommand, InputKey, MetadataKind, ReportState, SessionPageRequest};
 use crate::config::PluginConfig;
 use crate::render::{self, TerminalCapabilities};
-use crate::wire::{AgentInfo, ProjectInfo, Report, ReportSelection};
+use crate::wire::{
+    AgentInfo, ProjectInfo, Report, ReportSelection, SessionLogPage, SessionLogQuery,
+};
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const STATUS_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
@@ -59,6 +61,11 @@ enum Completion {
         token: u64,
         result: Result<Vec<String>, ApiError>,
     },
+    SessionLog {
+        token: u64,
+        result: Result<SessionLogPage, ApiError>,
+        append: bool,
+    },
 }
 
 pub struct Runtime {
@@ -70,6 +77,7 @@ pub struct Runtime {
     projects: Option<OwnedTask>,
     agents: Option<OwnedTask>,
     machines: Option<OwnedTask>,
+    session_log: Option<OwnedTask>,
     task_token: u64,
     report_timeout_configured: bool,
     report_wait_intervals: u32,
@@ -101,6 +109,7 @@ impl Runtime {
             projects: None,
             agents: None,
             machines: None,
+            session_log: None,
             task_token: 0,
             report_timeout_configured: config.request_timeout.is_some(),
             report_wait_intervals: 0,
@@ -127,6 +136,9 @@ impl Runtime {
             AppCommand::FetchSessionPage(request) => self.spawn_session_page(request),
             AppCommand::CancelSessionPage => abort_task(&mut self.session_page),
             AppCommand::FetchMetadata(kind) => self.spawn_metadata(kind),
+            AppCommand::FetchSessionLog { query, append } => {
+                self.spawn_session_log(query, append);
+            }
             AppCommand::Quit => return true,
         }
         false
@@ -142,6 +154,9 @@ impl Runtime {
         let request = self.scheduled_report_request(app);
         if let Some(request) = request {
             self.spawn_report(request);
+            if app.session_log_open() {
+                self.spawn_session_log(app.session_log_query(), false);
+            }
         }
         Ok(())
     }
@@ -219,6 +234,22 @@ impl Runtime {
         *self.metadata_slot_mut(kind) = Some(OwnedTask { token, handle });
     }
 
+    fn spawn_session_log(&mut self, query: SessionLogQuery, append: bool) {
+        abort_task(&mut self.session_log);
+        let token = self.next_task_token();
+        let client = self.client.clone();
+        let sender = self.sender.clone();
+        let handle = self.executor.spawn(async move {
+            let result = client.fetch_session_log(&query).await;
+            let _ = sender.send(Completion::SessionLog {
+                token,
+                result,
+                append,
+            });
+        });
+        self.session_log = Some(OwnedTask { token, handle });
+    }
+
     fn apply_completion(&mut self, app: &mut App, completion: Completion) -> bool {
         match completion {
             Completion::Report {
@@ -263,6 +294,16 @@ impl Runtime {
                     return false;
                 }
                 app.apply_machines(result);
+            }
+            Completion::SessionLog {
+                token,
+                result,
+                append,
+            } => {
+                if !take_current(&mut self.session_log, token) {
+                    return false;
+                }
+                app.apply_session_log(result, append);
             }
         }
         true
@@ -318,6 +359,7 @@ impl Drop for Runtime {
         abort_task(&mut self.projects);
         abort_task(&mut self.agents);
         abort_task(&mut self.machines);
+        abort_task(&mut self.session_log);
     }
 }
 
@@ -412,8 +454,20 @@ fn run_loop(
                 let today = Utc::now().with_timezone(&timezone).date_naive();
                 if let Some(input) = map_key(key) {
                     if let Some(command) = app.handle_input(input, today) {
+                        let followup = match &command {
+                            AppCommand::FetchReport(_) if app.session_log_open() => {
+                                Some(AppCommand::FetchSessionLog {
+                                    query: app.session_log_query(),
+                                    append: false,
+                                })
+                            }
+                            _ => None,
+                        };
                         if runtime.dispatch(command) {
                             return Ok(());
+                        }
+                        if let Some(followup) = followup {
+                            runtime.dispatch(followup);
                         }
                     }
                     redraw_requested = true;
@@ -431,6 +485,7 @@ fn redraw_required(app: &App, state_changed: bool, clock_due: bool) -> bool {
             app.report_state(),
             ReportState::InitialLoading | ReportState::Refreshing { .. }
         )
+        || app.session_log_is_loading()
         || clock_due
             && matches!(
                 app.report_state(),
@@ -442,6 +497,9 @@ fn synchronize_layout(app: &mut App, area: Rect) -> render::FramePlan {
     let plan = render::FramePlan::new(app, area);
     if let Some(visible_rows) = plan.session_viewport_rows() {
         app.set_session_viewport_rows(visible_rows);
+    }
+    if let Some(visible_rows) = plan.session_log_viewport_rows() {
+        app.set_session_log_viewport_rows(visible_rows);
     }
     plan
 }
