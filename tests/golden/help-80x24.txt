@@ -6,17 +6,17 @@ Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 │Sess│ Tab  next section                 Shift-Tab  previous section      │    │
 └────│ ←/→  change / inspect             ↑/↓  move selection              │────┘
 ┌ Con│ Enter  choose / slice             Backspace  clear / today         │────┐
-│I In│                                                                    │    │
-│2 ┤▓│BREAKDOWNS                                                          │    │
-│0 ┼█│ v  cost ↔ time                    p/m/a  project / model / agent   │┄┄┄┄│
-│   1│                                                                    │3:30│
-└────│COMPACT VIEW                                                        │────┘
-Secti│ s  sessions                       b  breakdowns                    │
-┌ Ses│                                                                    │────┐
-│  Se│GENERAL                                                             │    │
-│  Ru│ r  refresh / retry                Esc  cancel / close              │    │
-│  Re│ ?  close help                     q  close dashboard               │    │
-│  Im│                                                                    │    │
+│I In│ t  jump to today                                                   │    │
+│2 ┤▓│                                                                    │    │
+│0 ┼█│BREAKDOWNS                                                          │┄┄┄┄│
+│   1│ v  cost ↔ time                    p/m/a  project / model / agent   │3:30│
+└────│                                                                    │────┘
+Secti│COMPACT VIEW                                                        │
+┌ Ses│ s  sessions                       b  breakdowns                    │────┐
+│  Se│                                                                    │    │
+│  Ru│GENERAL                                                             │    │
+│  Re│ r  refresh / retry                Esc  cancel / close              │    │
+│  Im│ ?  close help                     q  close dashboard               │    │
 │    │                                                                    │    │
 │    └────────────────────────────────────────────────────────────────────┘    │
 │Model: model-alpha · Agent: codex · Window: 13:00–13:20                       │

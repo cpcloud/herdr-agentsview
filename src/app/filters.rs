@@ -147,6 +147,10 @@ impl App {
         changed
     }
 
+    pub(crate) fn jump_to_today(&mut self, today: NaiveDate) -> bool {
+        replace_if_changed(&mut self.selection.date, today)
+    }
+
     pub(crate) fn clear_focused_filter(&mut self, today: NaiveDate) -> bool {
         match self.focus {
             Focus::Date => replace_if_changed(&mut self.selection.date, today),
