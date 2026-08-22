@@ -102,9 +102,12 @@ pub(super) fn render_footer(
     class: LayoutClass,
     palette: Palette,
 ) {
-    let hints = app.contextual_keys();
+    let mut hints = app.contextual_keys();
     let use_compact =
         class == LayoutClass::Compact || footer_width(&hints, false, 2) > usize::from(area.width);
+    if use_compact && footer_width(&hints, true, 1) > usize::from(area.width) {
+        hints.retain(|hint| hint.key != "Tab");
+    }
     let gap = if use_compact { 1 } else { 2 };
     let mut spans = Vec::new();
     for (index, hint) in hints.into_iter().enumerate() {
