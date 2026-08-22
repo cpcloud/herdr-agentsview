@@ -63,6 +63,11 @@ impl App {
                     return self.foreground_command();
                 }
             }
+            InputKey::Char('t') => {
+                if self.jump_to_today(today) {
+                    return self.foreground_command();
+                }
+            }
             InputKey::Char('s') => {
                 self.compact_region = CompactRegion::Sessions;
                 self.focus = Focus::Sessions;
@@ -143,6 +148,9 @@ impl App {
                 self.report_state(),
                 ReportState::Failed(_) | ReportState::Stale { .. }
             );
+        if self.focus != Focus::Date {
+            hints.push(hint("t", "today", "t today"));
+        }
         hints.push(hint("Tab", "next section", "Tab next"));
         if retry {
             hints.push(hint("r", "retry", "r retry"));

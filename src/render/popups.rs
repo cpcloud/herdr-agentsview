@@ -115,6 +115,7 @@ fn render_help(buffer: &mut Buffer, area: Rect, palette: Palette) {
         HelpRow::Pair(("Tab", "next section"), ("Shift-Tab", "previous section")),
         HelpRow::Pair(("←/→", "change / inspect"), ("↑/↓", "move selection")),
         HelpRow::Pair(("Enter", "choose / slice"), ("Backspace", "clear / today")),
+        HelpRow::Single(("t", "jump to today")),
         HelpRow::Blank,
         HelpRow::Heading("BREAKDOWNS"),
         HelpRow::Pair(("v", "cost ↔ time"), ("p/m/a", "project / model / agent")),
@@ -140,6 +141,7 @@ fn render_help(buffer: &mut Buffer, area: Rect, palette: Palette) {
 enum HelpRow {
     Heading(&'static str),
     Pair((&'static str, &'static str), (&'static str, &'static str)),
+    Single((&'static str, &'static str)),
     Blank,
 }
 
@@ -165,6 +167,14 @@ fn render_help_row(buffer: &mut Buffer, area: Rect, row: HelpRow, palette: Palet
                     1,
                 ),
                 right,
+                palette,
+            );
+        }
+        HelpRow::Single(hint) => {
+            render_help_hint(
+                buffer,
+                Rect::new(area.x, area.y, area.width / 2, 1),
+                hint,
                 palette,
             );
         }

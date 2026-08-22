@@ -100,6 +100,58 @@ fn date_keys_move_calendar_days_and_backspace_restores_today() {
 }
 
 #[test]
+fn t_jumps_to_today_from_any_focus_and_requests_a_report() {
+    // If jump-to-today is scoped to the Date selector or forgets the fetch, the operator
+    // lands on a stale date or stares at yesterday's report labeled as today's.
+    let mut app = ready_app();
+    app.set_focus(Focus::Sessions);
+    assert!(app
+        .contextual_keys()
+        .iter()
+        .any(|hint| hint.key == "t" && hint.action == "today"));
+
+    let command = app.handle_input(InputKey::Char('t'), today());
+
+    assert_eq!(app.selection().date, today());
+    assert_eq!(report_selection(&command), app.selection());
+}
+
+#[test]
+fn t_on_today_does_not_request_a_redundant_report() {
+    // If jumping to the already selected day still fetches, the key silently discards the
+    // rendered report and session selection for an identical request.
+    let mut app = ready_app();
+    app.handle_input(InputKey::Char('t'), today());
+
+    let command = app.handle_input(InputKey::Char('t'), today());
+
+    assert!(command.is_none());
+    assert_eq!(app.selection().date, today());
+}
+
+#[test]
+fn project_search_keeps_t_as_text_instead_of_jumping_the_date() {
+    // If the global jump fires while the project search owns character input, typing a
+    // project name containing `t` rewrites the date filter and launches a report request.
+    let mut app = App::new(selection(), Duration::from_secs(300));
+    app.apply_projects(Ok(vec![ProjectInfo {
+        name: "project-alpha".to_owned(),
+        session_count: 1,
+    }]));
+    app.set_focus(Focus::Project);
+    app.handle_input(InputKey::Enter, today());
+
+    let command = app.handle_input(InputKey::Char('t'), today());
+
+    assert!(command.is_none());
+    assert_eq!(app.popup().unwrap().query, "t");
+    assert_eq!(
+        app.selection().date,
+        NaiveDate::from_ymd_opt(2026, 8, 8).unwrap()
+    );
+}
+
+#[test]
 fn project_popup_accepts_metadata_and_escape_cancels() {
     // If popup acceptance reads display text rather than typed metadata, All and a real
     // similarly named project can be confused or Esc can still mutate the filter.
