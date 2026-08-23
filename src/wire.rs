@@ -305,6 +305,8 @@ pub struct Bucket {
     pub end: DateTime<FixedOffset>,
     pub max_agents: usize,
     pub agent_minutes: f64,
+    #[serde(default)]
+    pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost: Money,
     pub automated_at_peak: usize,

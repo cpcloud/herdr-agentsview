@@ -790,6 +790,7 @@ mod tests {
                 end: timestamp,
                 max_agents: 0,
                 agent_minutes: 0.0,
+                input_tokens: 0,
                 output_tokens: 0,
                 cost: Money { microdollars: 0 },
                 automated_at_peak: 0,

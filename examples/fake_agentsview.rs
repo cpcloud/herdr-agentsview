@@ -470,6 +470,7 @@ fn empty_bucket(template: &Bucket) -> Bucket {
     let mut bucket = template.clone();
     bucket.max_agents = 0;
     bucket.agent_minutes = 0.0;
+    bucket.input_tokens = 0;
     bucket.output_tokens = 0;
     bucket.cost = Money { microdollars: 0 };
     bucket.automated_at_peak = 0;
