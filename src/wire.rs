@@ -99,7 +99,6 @@ impl ReportSelection {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Money {
     pub microdollars: i64,
 }
@@ -135,7 +134,6 @@ pub enum TimingQuality {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Report {
     pub schema_version: u32,
     pub report_id: Option<String>,
@@ -160,6 +158,8 @@ pub struct Report {
     pub by_session: Vec<SessionRow>,
     pub sessions_next_cursor: Option<String>,
     pub sessions_total: usize,
+    #[serde(skip)]
+    pub unused_fields: Vec<String>,
 }
 
 impl Report {
@@ -199,7 +199,6 @@ impl Report {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct SessionPage {
     pub report_id: String,
     #[serde(deserialize_with = "deserialize_null_default")]
@@ -212,7 +211,6 @@ pub struct SessionPage {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PricingBlock {
     pub source: String,
     pub table_version: String,
@@ -226,21 +224,18 @@ pub struct PricingBlock {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PricingFallback {
     pub used: bool,
     pub models: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ModelPricingProvenance {
     pub cost_source: CostSource,
     pub resolutions: Vec<EffectiveModelRate>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct EffectiveModelRate {
     pub priced_model: String,
     pub matched_pattern: Option<String>,
@@ -255,7 +250,6 @@ pub struct EffectiveModelRate {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PricingBand {
     pub above_input_tokens: u64,
     pub input_cost_per_mtok: Money,
@@ -265,7 +259,6 @@ pub struct PricingBand {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PricingApplication {
     pub base_request_count: usize,
     pub aggregate_row_count: usize,
@@ -274,14 +267,12 @@ pub struct PricingApplication {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct AppliedPricingBand {
     pub above_input_tokens: u64,
     pub request_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectIdentity {
     pub key: String,
     pub kind: ProjectKind,
@@ -291,7 +282,6 @@ pub struct ProjectIdentity {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectMapEntry {
     pub display_label: String,
     pub resolution: ProjectResolution,
@@ -299,7 +289,6 @@ pub struct ProjectMapEntry {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Bucket {
     pub start: DateTime<FixedOffset>,
     pub end: DateTime<FixedOffset>,
@@ -314,14 +303,12 @@ pub struct Bucket {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Peak {
     pub agents: usize,
     pub at: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Totals {
     pub active_minutes: f64,
     pub idle_minutes: f64,
@@ -341,7 +328,6 @@ pub struct Totals {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct KeyMinutes {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_key: Option<String>,
@@ -355,7 +341,6 @@ pub struct KeyMinutes {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct SessionRow {
     pub session_id: String,
     pub project_key: String,
@@ -375,21 +360,18 @@ pub struct SessionRow {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectInfo {
     pub name: String,
     pub session_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct AgentInfo {
     pub name: String,
     pub session_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectsResponse {
     projects: Option<Vec<ProjectInfo>>,
 }
@@ -401,7 +383,6 @@ impl ProjectsResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct AgentsResponse {
     agents: Option<Vec<AgentInfo>>,
 }
@@ -413,7 +394,6 @@ impl AgentsResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct MachinesResponse {
     machines: Option<Vec<String>>,
 }

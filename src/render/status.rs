@@ -40,9 +40,19 @@ pub(super) fn render_report_notice(
 pub(super) fn header_status(app: &App, now: DateTime<Utc>) -> String {
     match app.report_state() {
         ReportState::InitialLoading => String::new(),
-        ReportState::Ready { received_at, .. } => format!("Updated {} ago", age(now, *received_at)),
+        ReportState::Ready { received_at, .. } => {
+            format!(
+                "Updated {} ago{}",
+                age(now, *received_at),
+                unused_suffix(app)
+            )
+        }
         ReportState::Refreshing { received_at, .. } => {
-            format!("Last update {} ago", age(now, *received_at))
+            format!(
+                "Last update {} ago{}",
+                age(now, *received_at),
+                unused_suffix(app)
+            )
         }
         ReportState::Stale {
             received_at, error, ..
@@ -104,6 +114,15 @@ fn braille_spinner(now: DateTime<Utc>) -> &'static str {
     FRAMES[frame]
 }
 
+fn unused_suffix(app: &App) -> String {
+    match app.report() {
+        Some(report) if !report.unused_fields.is_empty() => {
+            format!(" · unused {}", report.unused_fields.join(", "))
+        }
+        _ => String::new(),
+    }
+}
+
 fn with_recovery_hint(message: impl AsRef<str>) -> String {
     format!("{}{RECOVERY_HINT}", message.as_ref())
 }
@@ -136,9 +155,37 @@ fn concise_error(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use std::time::Duration;
 
-    use super::braille_spinner;
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    use super::{braille_spinner, header_status};
+    use crate::app::App;
+    use crate::wire::{Report, ReportSelection};
+
+    #[test]
+    fn unused_fields_appear_in_ready_status() {
+        // If additive keys stay only in memory, operators cannot tell that AgentsView sent
+        // fields this client does not model yet.
+        let mut report: Report =
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+        report.unused_fields = vec!["unexpected".to_owned()];
+        let mut app = App::new(
+            ReportSelection::new(
+                NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+                "America/New_York".parse().unwrap(),
+            ),
+            Duration::from_secs(300),
+        );
+        app.begin_foreground_load();
+        let received_at = "2026-08-08T17:21:00Z".parse().unwrap();
+        app.apply_report(Ok(Box::new(report)), received_at);
+
+        assert_eq!(
+            header_status(&app, received_at),
+            "Updated 0s ago · unused unexpected"
+        );
+    }
 
     #[test]
     fn spinner_frames_leave_the_top_braille_row_empty() {

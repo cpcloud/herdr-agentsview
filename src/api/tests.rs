@@ -683,11 +683,12 @@ async fn well_formed_json_with_an_invalid_version_type_is_a_contract_error() {
 }
 
 #[tokio::test]
-async fn same_version_unknown_field_is_a_contract_error() {
-    // If strict schema-v6 decoding is bypassed after version preflight, new fields are
-    // silently discarded and the UI can misrepresent server-computed totals.
+async fn same_version_unknown_fields_are_collected_without_failing() {
+    // Additive same-version fields must not take the dashboard down. Collect their paths so
+    // operators can see that AgentsView sent keys this client does not model yet.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     value["unexpected"] = serde_json::json!(true);
+    value["by_session"][0]["unexpected_session"] = serde_json::json!(true);
     let body = serde_json::to_vec(&value).unwrap();
     let server = RecordingServer::start(ResponsePlan::json(body)).await;
     let client = ActivityClient::new(&config(
@@ -697,10 +698,32 @@ async fn same_version_unknown_field_is_a_contract_error() {
     ))
     .unwrap();
 
-    let error = client.fetch_report(&selection()).await.unwrap_err();
+    let report = client.fetch_report(&selection()).await.unwrap();
 
-    assert_eq!(error.kind, ApiErrorKind::Protocol);
-    assert!(error.to_string().contains("schema v6 contract"));
+    assert_eq!(
+        report.unused_fields,
+        ["by_session[0].unexpected_session", "unexpected"]
+    );
+}
+
+#[tokio::test]
+async fn unused_field_path_redacts_project_map_keys() {
+    // If an additive field sits under a server-chosen project key, the unused-path list
+    // must not disclose that identity in the header status.
+    let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
+    value["projects"]["pl1-alpha"]["unexpected"] = serde_json::json!(true);
+    let body = serde_json::to_vec(&value).unwrap();
+    let server = RecordingServer::start(ResponsePlan::json(body)).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let report = client.fetch_report(&selection()).await.unwrap();
+
+    assert_eq!(report.unused_fields, ["projects[*].unexpected"]);
 }
 
 #[tokio::test]
@@ -775,9 +798,9 @@ async fn contract_path_is_bounded_and_control_free_for_server_chosen_map_keys() 
 }
 
 #[tokio::test]
-async fn contract_path_sanitizes_hostile_unknown_field_names() {
-    // If an unknown field name contains terminal controls, the protocol diagnostic must
-    // remain safe and bounded even though that path segment is not a redacted map key.
+async fn unused_field_path_sanitizes_hostile_unknown_field_names() {
+    // If an unused field name contains terminal controls, the collected path must remain
+    // safe and bounded even though that path segment is not a redacted map key.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     let hostile_key = format!("unexpected\u{1b}]0;changed\u{7}{}", "x".repeat(500));
     value[hostile_key] = serde_json::json!(true);
@@ -790,12 +813,10 @@ async fn contract_path_sanitizes_hostile_unknown_field_names() {
     ))
     .unwrap();
 
-    let rendered = client
-        .fetch_report(&selection())
-        .await
-        .unwrap_err()
-        .to_string();
+    let report = client.fetch_report(&selection()).await.unwrap();
+    let rendered = report.unused_fields.join(" ");
 
+    assert_eq!(report.unused_fields.len(), 1);
     assert!(!rendered.contains('\u{1b}'));
     assert!(!rendered.contains('\u{7}'));
     assert!(rendered.contains("unexpected"));
@@ -828,9 +849,9 @@ async fn contract_path_redacts_project_map_keys() {
 }
 
 #[tokio::test]
-async fn unprintable_contract_path_falls_back_to_the_generic_message() {
-    // If every path character is stripped for terminal safety, the diagnostic must remain
-    // a complete sentence instead of ending with a dangling location preposition.
+async fn unprintable_unused_field_path_is_dropped() {
+    // If every path character is stripped for terminal safety, an unused field must not
+    // leave an empty marker in the collected list.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     value["\u{1b}\u{7}"] = serde_json::json!(true);
     let body = serde_json::to_vec(&value).unwrap();
@@ -842,16 +863,9 @@ async fn unprintable_contract_path_falls_back_to_the_generic_message() {
     ))
     .unwrap();
 
-    let rendered = client
-        .fetch_report(&selection())
-        .await
-        .unwrap_err()
-        .to_string();
+    let report = client.fetch_report(&selection()).await.unwrap();
 
-    assert_eq!(
-        rendered,
-        "AgentsView response does not match the schema v6 contract"
-    );
+    assert!(report.unused_fields.is_empty());
 }
 
 #[tokio::test]
