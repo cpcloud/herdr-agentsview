@@ -70,6 +70,22 @@ fn nullable_untimed_session_models_normalize_to_an_empty_typed_list() {
 }
 
 #[test]
+fn bucket_input_tokens_decode_on_schema_v6() {
+    // AgentsView added input_tokens to activity buckets without bumping schema_version.
+    // If the decoder still treats that field as unknown, live reports fail before render.
+    let mut value: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
+    value["buckets"][0]["input_tokens"] = serde_json::json!(1200);
+    value["buckets"][1]["input_tokens"] = serde_json::json!(800);
+
+    let report = serde_json::from_value::<Report>(value)
+        .expect("schema v6 reports with bucket input_tokens must decode");
+
+    assert_eq!(report.buckets[0].input_tokens, 1200);
+    assert_eq!(report.buckets[1].input_tokens, 800);
+}
+
+#[test]
 fn unknown_contract_field_is_rejected() {
     // If a same-version response grows silently, strict decoding must force an explicit
     // compatibility decision rather than dropping data the UI may need.
