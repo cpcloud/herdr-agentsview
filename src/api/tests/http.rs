@@ -24,6 +24,7 @@ pub(super) struct RecordedRequest {
     pub method: String,
     pub path: String,
     pub query: Vec<(String, String)>,
+    pub body: Vec<u8>,
     pub had_bearer_header: bool,
     pub bearer_matched: Option<bool>,
 }
@@ -273,8 +274,7 @@ where
             ));
         }
     };
-    let request = parse_request(&bytes[..header_end], expected_bearer.as_ref())?;
-    drop(bytes);
+    let request = parse_request(&bytes, header_end, expected_bearer.as_ref(), &mut stream).await?;
     let _ = request_tx.send(request);
 
     if let Some(delay) = plan.delay {
@@ -305,11 +305,16 @@ where
     }
 }
 
-fn parse_request(
+async fn parse_request<S>(
     bytes: &[u8],
+    header_end: usize,
     expected_bearer: Option<&SecretString>,
-) -> io::Result<RecordedRequest> {
-    let request = std::str::from_utf8(bytes)
+    stream: &mut S,
+) -> io::Result<RecordedRequest>
+where
+    S: AsyncRead + Unpin,
+{
+    let request = std::str::from_utf8(&bytes[..header_end])
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "request head is not UTF-8"))?;
     let mut lines = request.split("\r\n");
     let mut request_parts = lines
@@ -329,6 +334,7 @@ fn parse_request(
         .collect();
     let mut had_bearer_header = false;
     let mut bearer_matched = expected_bearer.map(|_| false);
+    let mut content_length = 0_usize;
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
             continue;
@@ -340,11 +346,28 @@ fn parse_request(
                     Some(value.trim().strip_prefix("Bearer ") == Some(expected.expose_secret()));
             }
         }
+        if name.eq_ignore_ascii_case("content-length") {
+            content_length = value.trim().parse().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid Content-Length")
+            })?;
+        }
     }
+    let mut body = bytes[header_end..].to_vec();
+    while body.len() < content_length {
+        let read = stream.read_buf(&mut body).await?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed before request body",
+            ));
+        }
+    }
+    body.truncate(content_length);
     Ok(RecordedRequest {
         method,
         path: path.to_owned(),
         query,
+        body,
         had_bearer_header,
         bearer_matched,
     })

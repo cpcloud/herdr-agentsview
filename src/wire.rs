@@ -423,3 +423,152 @@ impl MachinesResponse {
         self.machines.unwrap_or_default()
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionLogQuery {
+    pub date: NaiveDate,
+    pub timezone: Tz,
+    pub project: Option<String>,
+    pub agent: Option<String>,
+    pub machine: Option<String>,
+    pub include_automated: bool,
+    pub cursor: Option<String>,
+}
+
+impl SessionLogQuery {
+    pub const LIMIT: u32 = 200;
+
+    pub fn from_selection(selection: &ReportSelection) -> Self {
+        Self {
+            date: selection.date,
+            timezone: selection.timezone,
+            project: selection.project.clone(),
+            agent: selection.agent.clone(),
+            machine: selection.machine.clone(),
+            include_automated: selection.automation != Automation::Interactive,
+            cursor: None,
+        }
+    }
+
+    pub fn with_cursor(mut self, cursor: impl Into<String>) -> Self {
+        let cursor = cursor.into();
+        self.cursor = (!cursor.is_empty()).then_some(cursor);
+        self
+    }
+
+    pub fn query_pairs(&self) -> Vec<(&'static str, String)> {
+        let mut pairs = vec![
+            ("date", self.date.format("%Y-%m-%d").to_string()),
+            ("timezone", self.timezone.name().to_owned()),
+            ("include_one_shot", "true".to_owned()),
+            ("include_children", "true".to_owned()),
+            ("order_by", "recent".to_owned()),
+            ("limit", Self::LIMIT.to_string()),
+        ];
+        if let Some(project) = &self.project {
+            pairs.push(("project", project.clone()));
+        }
+        if let Some(agent) = &self.agent {
+            pairs.push(("agent", agent.clone()));
+        }
+        if let Some(machine) = &self.machine {
+            pairs.push(("machine", machine.clone()));
+        }
+        if self.include_automated {
+            pairs.push(("include_automated", "true".to_owned()));
+        }
+        if let Some(cursor) = &self.cursor {
+            pairs.push(("cursor", cursor.clone()));
+        }
+        pairs
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionLogPage {
+    #[serde(default)]
+    pub sessions: Vec<SessionLogEntry>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    #[serde(default)]
+    pub total: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionLogEntry {
+    pub id: String,
+    #[serde(default)]
+    pub project: String,
+    #[serde(default)]
+    pub machine: String,
+    #[serde(default)]
+    pub agent: String,
+    #[serde(default)]
+    pub agent_label: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub first_message: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub message_count: usize,
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
+    #[serde(default)]
+    pub relationship_type: Option<String>,
+    #[serde(default)]
+    pub is_automated: bool,
+    #[serde(default)]
+    pub is_teammate: bool,
+}
+
+impl SessionLogEntry {
+    pub fn title(&self) -> &str {
+        nonempty(self.display_name.as_deref())
+            .or_else(|| nonempty(self.first_message.as_deref()))
+            .unwrap_or("Untitled")
+    }
+
+    pub fn agent_identity(&self) -> &str {
+        nonempty(self.agent_label.as_deref()).unwrap_or(self.agent.as_str())
+    }
+
+    pub fn project_label(&self) -> Option<&str> {
+        nonempty(Some(self.project.as_str()))
+    }
+
+    pub fn machine_label(&self) -> Option<&str> {
+        nonempty(Some(self.machine.as_str()))
+    }
+
+    pub fn recency_timestamp(&self) -> Option<&str> {
+        nonempty(self.ended_at.as_deref())
+            .or_else(|| nonempty(self.started_at.as_deref()))
+            .or_else(|| nonempty(Some(self.created_at.as_str())))
+    }
+}
+
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then_some(value)
+    })
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResumeResponse {
+    #[serde(default)]
+    pub launched: bool,
+    #[serde(default)]
+    pub terminal: Option<String>,
+    pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}

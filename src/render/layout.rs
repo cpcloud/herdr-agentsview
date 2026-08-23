@@ -4,7 +4,7 @@
 
 use ratatui::layout::Rect;
 
-use crate::app::{App, CompactRegion};
+use crate::app::{App, CompactRegion, View};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LayoutClass {
@@ -35,6 +35,7 @@ pub struct FramePlan {
     sessions: Option<Rect>,
     breakdowns: Option<Rect>,
     compact_rail: Option<Rect>,
+    session_log: Option<Rect>,
     footer: Option<Rect>,
 }
 
@@ -51,6 +52,7 @@ impl FramePlan {
                 sessions: None,
                 breakdowns: None,
                 compact_rail: None,
+                session_log: None,
                 footer: None,
             };
         }
@@ -63,6 +65,25 @@ impl FramePlan {
         );
         let mut cursor = area.y;
         let header = take(area, &mut cursor, 2);
+        if app.view() == View::SessionLog {
+            return Self {
+                area,
+                class,
+                header: Some(header),
+                summary: None,
+                timeline: None,
+                sessions: None,
+                breakdowns: None,
+                compact_rail: None,
+                session_log: Some(Rect::new(
+                    area.x,
+                    cursor,
+                    area.width,
+                    footer.y.saturating_sub(cursor),
+                )),
+                footer: Some(footer),
+            };
+        }
         let summary_height = if class == LayoutClass::Compact { 5 } else { 4 };
         let summary = take(area, &mut cursor, summary_height);
         let timeline_height = match class {
@@ -118,6 +139,7 @@ impl FramePlan {
             sessions,
             breakdowns,
             compact_rail,
+            session_log: None,
             footer: Some(footer),
         }
     }
@@ -157,6 +179,15 @@ impl FramePlan {
 
     pub(super) fn compact_rail(&self) -> Option<Rect> {
         self.compact_rail
+    }
+
+    pub(super) fn session_log(&self) -> Option<Rect> {
+        self.session_log
+    }
+
+    pub fn session_log_viewport_rows(&self) -> Option<usize> {
+        self.session_log
+            .map(|area| super::session_log::viewport_rows(area, self.class))
     }
 
     pub(super) fn footer(&self) -> Option<Rect> {

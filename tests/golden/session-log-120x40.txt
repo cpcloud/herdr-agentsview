@@ -1,0 +1,40 @@
+AgentsView                                                                                               Updated 12s ago
+Date 2026-08-08 · Project All · Agent All · Machine All · Session All
+┌ Session log (2) ─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│▸ Audit every Codex session                                                                                           │
+│  project-alpha  1m ago  21  Codex  machine-alpha                                                                     │
+│  Untitled                                                                                                            │
+│  project-beta  3d ago  0  reviewer  team                                                                             │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑/↓  select row   Enter  resume   r  refresh   Esc  activity   o  leave log   ?  keys   q  close dashboard

@@ -11,7 +11,7 @@ use secrecy::SecretString;
 use url::Url;
 
 use crate::config::PluginConfig;
-use crate::wire::{Automation, ReportSelection};
+use crate::wire::{Automation, ReportSelection, SessionLogQuery};
 
 use super::{
     safe_contract_path, safe_excerpt, ActivityClient, ApiErrorKind, SessionFetch,
@@ -26,6 +26,7 @@ const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v6.json")
 const PROJECTS_FIXTURE: &str = include_str!("../../tests/fixtures/projects.json");
 const AGENTS_FIXTURE: &str = include_str!("../../tests/fixtures/agents.json");
 const MACHINES_FIXTURE: &str = include_str!("../../tests/fixtures/machines.json");
+const SESSIONS_FIXTURE: &str = include_str!("../../tests/fixtures/sessions.json");
 
 fn selection() -> ReportSelection {
     ReportSelection::new(
@@ -134,6 +135,115 @@ async fn metadata_requests_include_one_shot_and_automated_sessions() {
     let request = machines.take_request().await;
     assert_eq!(request.path, "/api/v1/machines");
     assert_eq!(request.query, expected_query);
+}
+
+#[tokio::test]
+async fn session_log_request_uses_only_supported_list_query() {
+    // If the log request hits Activity or drops include_children, the sidebar hierarchy
+    // cannot be rebuilt from the documented session list contract.
+    let mut server = RecordingServer::start(ResponsePlan::json(SESSIONS_FIXTURE)).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+    let query = SessionLogQuery::from_selection(
+        &selection()
+            .with_project("project-alpha")
+            .with_agent("codex")
+            .with_machine("machine-alpha"),
+    );
+
+    let page = client.fetch_session_log(&query).await.unwrap();
+    let request = server.take_request().await;
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.sessions[0].id, "session-root-alpha");
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, "/api/v1/sessions");
+    assert_eq!(
+        request.query,
+        query
+            .query_pairs()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect::<Vec<_>>()
+    );
+    assert!(!request.had_bearer_header);
+}
+
+#[tokio::test]
+async fn session_log_invalid_json_is_a_protocol_error() {
+    // If malformed session list bodies become empty logs, a broken AgentsView looks like
+    // a day with no sessions.
+    let mut server = RecordingServer::start(ResponsePlan::json("{")).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client
+        .fetch_session_log(&SessionLogQuery::from_selection(&selection()))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("session log"));
+    server.take_request().await;
+}
+
+#[tokio::test]
+async fn resume_posts_command_only_true_to_the_session_resume_path() {
+    // If resume GETs the list, omits command_only, or invents a CLI template, Herdr launches
+    // the wrong thing and AgentsView cannot own native resume flags.
+    let mut server = RecordingServer::start(ResponsePlan::json(
+        r#"{"launched":false,"command":"cd /repo && claude --resume abc-123","cwd":"/repo"}"#,
+    ))
+    .await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let response = client.resume_session("session-root-alpha").await.unwrap();
+    let request = server.take_request().await;
+
+    assert_eq!(response.command, "cd /repo && claude --resume abc-123");
+    assert_eq!(response.cwd.as_deref(), Some("/repo"));
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/api/v1/sessions/session-root-alpha/resume");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&request.body).unwrap(),
+        serde_json::json!({ "command_only": true })
+    );
+}
+
+#[tokio::test]
+async fn resume_rejects_an_empty_command_without_inventing_one() {
+    // If an empty resume command is treated as success, the plugin would have to guess a
+    // native agent invocation from the session id.
+    let mut server =
+        RecordingServer::start(ResponsePlan::json(r#"{"launched":false,"command":""}"#)).await;
+    let client = ActivityClient::new(&config(
+        server.base_url().clone(),
+        None,
+        Duration::from_secs(2),
+    ))
+    .unwrap();
+
+    let error = client
+        .resume_session("session-root-alpha")
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.kind, ApiErrorKind::Protocol);
+    assert!(error.to_string().contains("resume command"));
+    server.take_request().await;
 }
 
 #[tokio::test]

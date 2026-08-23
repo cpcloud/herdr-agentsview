@@ -17,9 +17,12 @@ use unicode_width::UnicodeWidthChar;
 use url::Url;
 
 use crate::config::{validate_base_url, PluginConfig};
+use serde::Serialize;
+
 use crate::wire::{
     AgentInfo, AgentsResponse, MachinesResponse, ProjectInfo, ProjectsResponse, Report,
-    ReportSelection, SessionPage, SessionRow, ACTIVITY_SCHEMA_VERSION,
+    ReportSelection, ResumeResponse, SessionLogPage, SessionLogQuery, SessionPage, SessionRow,
+    ACTIVITY_SCHEMA_VERSION,
 };
 
 const ERROR_EXCERPT_CHARS: usize = 160;
@@ -142,6 +145,48 @@ impl ActivityClient {
         serde_json::from_slice::<MachinesResponse>(&body)
             .map(MachinesResponse::into_machines)
             .map_err(|_| ApiError::protocol("AgentsView returned invalid machines metadata"))
+    }
+
+    pub async fn fetch_session_log(
+        &self,
+        query: &SessionLogQuery,
+    ) -> Result<SessionLogPage, ApiError> {
+        let body = self.get("api/v1/sessions", &query.query_pairs()).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| ApiError::protocol("AgentsView returned invalid JSON for the session log"))
+    }
+
+    pub async fn resume_session(&self, session_id: &str) -> Result<ResumeResponse, ApiError> {
+        if session_id.trim().is_empty() {
+            return Err(ApiError::protocol("AgentsView session id is missing"));
+        }
+        let mut endpoint = self
+            .base_url
+            .join("api/v1/sessions/")
+            .map_err(|_| ApiError::protocol("invalid AgentsView endpoint configuration"))?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| ApiError::protocol("invalid AgentsView endpoint configuration"))?
+            .pop_if_empty()
+            .push(session_id)
+            .push("resume");
+        let body = self
+            .post_json(endpoint, &ResumeRequest { command_only: true })
+            .await?;
+        let mut response: ResumeResponse = serde_json::from_slice(&body).map_err(|_| {
+            ApiError::protocol("AgentsView returned invalid JSON for session resume")
+        })?;
+        if response.command.trim().is_empty() {
+            return Err(ApiError::protocol("AgentsView resume command is empty"));
+        }
+        if response
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| cwd.trim().is_empty())
+        {
+            response.cwd = None;
+        }
+        Ok(response)
     }
 
     async fn get(&self, path: &str, query: &[(&'static str, String)]) -> Result<Vec<u8>, ApiError> {
@@ -270,6 +315,10 @@ impl ActivityClient {
             .map(SessionFetch::Refreshed)
     }
 
+    async fn post_json<T: Serialize>(&self, endpoint: Url, body: &T) -> Result<Vec<u8>, ApiError> {
+        self.send(self.http.post(endpoint).json(body)).await
+    }
+
     async fn get_endpoint(
         &self,
         mut endpoint: Url,
@@ -281,7 +330,10 @@ impl ActivityClient {
                 pairs.append_pair(key, value);
             }
         }
-        let mut request = self.http.get(endpoint);
+        self.send(self.http.get(endpoint)).await
+    }
+
+    async fn send(&self, mut request: reqwest::RequestBuilder) -> Result<Vec<u8>, ApiError> {
         if let Some(auth) = &self.auth {
             request = request.bearer_auth(auth.expose_secret());
         }
@@ -306,18 +358,14 @@ impl ActivityClient {
             .is_some_and(|length| length > body_limit as u64)
         {
             return if status.is_success() {
-                Err(ApiError::protocol(
-                    "AgentsView response body is too large for the Activity dashboard",
-                ))
+                Err(ApiError::protocol("AgentsView response body is too large"))
             } else {
                 Err(ApiError::from_status(status, &[], authenticated))
             };
         }
         let body = read_bounded_body(response, body_limit).await?;
         if body.truncated && status.is_success() {
-            return Err(ApiError::protocol(
-                "AgentsView response body is too large for the Activity dashboard",
-            ));
+            return Err(ApiError::protocol("AgentsView response body is too large"));
         }
         if !status.is_success() {
             return Err(ApiError::from_status(status, &body.bytes, authenticated));
@@ -329,6 +377,11 @@ impl ActivityClient {
 enum Hydration {
     Complete(Report),
     Refreshed(Report),
+}
+
+#[derive(Serialize)]
+struct ResumeRequest {
+    command_only: bool,
 }
 
 fn decode_report(body: &[u8]) -> Result<Report, ApiError> {

@@ -104,7 +104,7 @@ pub(super) fn render(
 
 fn render_help(buffer: &mut Buffer, area: Rect, palette: Palette) {
     let width = 70.min(area.width.saturating_sub(4));
-    let height = 18.min(area.height.saturating_sub(4));
+    let height = 21.min(area.height.saturating_sub(4));
     let popup_area = centered(area, width, height);
     Clear.render(popup_area, buffer);
     let block = palette.block(" Keyboard help ", true);
@@ -119,9 +119,11 @@ fn render_help(buffer: &mut Buffer, area: Rect, palette: Palette) {
         HelpRow::Blank,
         HelpRow::Heading("BREAKDOWNS"),
         HelpRow::Pair(("v", "cost ↔ time"), ("p/m/a", "project / model / agent")),
-        HelpRow::Blank,
         HelpRow::Heading("COMPACT VIEW"),
         HelpRow::Pair(("s", "sessions"), ("b", "breakdowns")),
+        HelpRow::Heading("SESSION LOG"),
+        HelpRow::Pair(("o", "open / leave"), ("Esc", "back to activity")),
+        HelpRow::Pair(("Enter", "resume session"), ("←/→", "expand / collapse")),
         HelpRow::Blank,
         HelpRow::Heading("GENERAL"),
         HelpRow::Pair(("r", "refresh / retry"), ("Esc", "cancel / close")),
@@ -217,5 +219,6 @@ fn focus_name(focus: Focus) -> &'static str {
         Focus::Timeline => "Timeline",
         Focus::Sessions => "Sessions",
         Focus::Breakdowns => "Breakdowns",
+        Focus::SessionLog => "Session log",
     }
 }

@@ -20,6 +20,7 @@ pub enum Focus {
     Timeline,
     Sessions,
     Breakdowns,
+    SessionLog,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,7 +94,8 @@ impl App {
             | Focus::Agent
             | Focus::Machine
             | Focus::Automation
-            | Focus::Timeline => {}
+            | Focus::Timeline
+            | Focus::SessionLog => {}
         }
         self.popup = None;
     }
@@ -114,23 +116,40 @@ impl App {
         self.selection.machine = machine;
     }
 
+    pub fn set_automation(&mut self, automation: crate::wire::Automation) {
+        self.selection.automation = automation;
+    }
+
     pub(crate) fn move_focus(&mut self, delta: isize) {
-        const ORDER: [Focus; 8] = [
-            Focus::Date,
-            Focus::Project,
-            Focus::Agent,
-            Focus::Machine,
-            Focus::Automation,
-            Focus::Timeline,
-            Focus::Sessions,
-            Focus::Breakdowns,
-        ];
-        let current = ORDER
+        let order = if self.session_log_open() {
+            [
+                Focus::Date,
+                Focus::Project,
+                Focus::Agent,
+                Focus::Machine,
+                Focus::Automation,
+                Focus::SessionLog,
+            ]
+            .as_slice()
+        } else {
+            [
+                Focus::Date,
+                Focus::Project,
+                Focus::Agent,
+                Focus::Machine,
+                Focus::Automation,
+                Focus::Timeline,
+                Focus::Sessions,
+                Focus::Breakdowns,
+            ]
+            .as_slice()
+        };
+        let current = order
             .iter()
             .position(|focus| *focus == self.focus)
-            .expect("closed focus value");
-        let next = (current as isize + delta).rem_euclid(ORDER.len() as isize) as usize;
-        self.set_focus(ORDER[next]);
+            .unwrap_or(0);
+        let next = (current as isize + delta).rem_euclid(order.len() as isize) as usize;
+        self.set_focus(order[next]);
     }
 
     pub(crate) fn move_date(&mut self, direction: Ordering) -> bool {
@@ -160,7 +179,7 @@ impl App {
             Focus::Automation => {
                 replace_if_changed(&mut self.selection.automation, Automation::All)
             }
-            Focus::Timeline | Focus::Sessions | Focus::Breakdowns => false,
+            Focus::Timeline | Focus::Sessions | Focus::Breakdowns | Focus::SessionLog => false,
         }
     }
 
@@ -212,7 +231,13 @@ impl App {
                     .collect();
                 (items, selected)
             }
-            Focus::Date | Focus::Timeline | Focus::Sessions | Focus::Breakdowns => return false,
+            Focus::Date
+            | Focus::Timeline
+            | Focus::Sessions
+            | Focus::Breakdowns
+            | Focus::SessionLog => {
+                return false;
+            }
         };
         let visible = (0..items.len()).collect();
         self.popup = Some(FilterPopup {
@@ -311,7 +336,11 @@ impl App {
             Focus::Agent => matches!(self.agents, Loadable::Ready(_)),
             Focus::Machine => matches!(self.machines, Loadable::Ready(_)),
             Focus::Automation => true,
-            Focus::Date | Focus::Timeline | Focus::Sessions | Focus::Breakdowns => false,
+            Focus::Date
+            | Focus::Timeline
+            | Focus::Sessions
+            | Focus::Breakdowns
+            | Focus::SessionLog => false,
         }
     }
 }

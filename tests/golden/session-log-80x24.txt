@@ -1,24 +1,24 @@
-AgentsView ⠖
-Date 2026-08-08 · Proj … · Agent … · Host … · Session All
-┌ Summary ─────────────────────────────────────────────────────────────────────┐
+AgentsView                                                       Updated 12s ago
+Date 2026-08-08 · Proj All · Agent All · Host All · Session All
+┌ Session log (2) ─────────────────────────────────────────────────────────────┐
+│▸ Audit every Codex session                                                   │
+│  project-alpha  1m ago  21  Codex  machine-alpha                             │
+│  Untitled                                                                    │
+│  project-beta  3d ago  0  reviewer  team                                     │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
-┌ Concurrent agents ───────────────────────────────────────────────────────────┐
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-Sections:  s  Sessions   b  Breakdown   p/m/a  category
-┌ Sessions ────────────────────────────────────────────────────────────────────┐
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- ←/→  day  Bksp  today  Tab  next  o  log  ?  keys  q  quit
+ ↑/↓  row  Enter  resume  r  refresh  Esc  activity  o  leave  ?  keys  q  quit

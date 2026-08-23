@@ -7,7 +7,7 @@ use std::time::Duration;
 use herdr_agentsview::api::{ApiError, ApiErrorKind};
 use herdr_agentsview::app::{App, BreakdownValue, Focus, InputKey};
 use herdr_agentsview::render::{self, ColorMode, LayoutClass, TerminalCapabilities};
-use herdr_agentsview::wire::{Automation, Money, ProjectInfo};
+use herdr_agentsview::wire::{Automation, Money, ProjectInfo, SessionLogPage};
 use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthStr;
 
@@ -845,6 +845,7 @@ fn help_overlay_clears_the_dashboard_and_lists_terminal_controls() {
         "NAVIGATION",
         "BREAKDOWNS",
         "COMPACT VIEW",
+        "SESSION LOG",
         "GENERAL",
         "Shift-Tab",
         "cost ↔ time",
@@ -982,6 +983,147 @@ fn too_small_terminal_names_the_minimum_without_panicking() {
     assert!(text.contains("Need 80x24"));
     assert!(text.contains("q close"));
     assert_width(&text, 60);
+}
+
+fn session_log_app(color_mode: ColorMode) -> herdr_agentsview::app::App {
+    let mut app = ready_app(color_mode);
+    app.handle_input(InputKey::Char('o'), activity::selection().date);
+    app.apply_session_log(
+        Ok(serde_json::from_str::<SessionLogPage>(include_str!("fixtures/sessions.json")).unwrap()),
+        false,
+    );
+    app
+}
+
+#[test]
+fn session_log_render_shows_identity_and_keeps_children_collapsed() {
+    // If the log drops title, recency, or relationship markers, the Activity table is still
+    // the only session surface and the AgentsView sidebar workflow is missing.
+    let app = session_log_app(ColorMode::Monochrome);
+    let text = render::to_text_at(&app, 120, 40, render_time());
+
+    assert!(text.contains("Session log (2)"), "{text}");
+    assert!(text.contains("Audit every Codex session"), "{text}");
+    assert!(text.contains("Untitled"), "{text}");
+    assert!(text.contains("project-alpha"), "{text}");
+    assert!(text.contains("Codex"), "{text}");
+    assert!(text.contains("machine-alpha"), "{text}");
+    assert!(text.contains("▸"), "{text}");
+    assert!(
+        !text.contains("Read and perform the complete adversarial review"),
+        "{text}"
+    );
+    assert!(!text.contains("┌ Summary"), "{text}");
+    assert_width(&text, 120);
+
+    let mut expanded = session_log_app(ColorMode::Monochrome);
+    expanded.handle_input(InputKey::Right, activity::selection().date);
+    let expanded_text = render::to_text_at(&expanded, 120, 40, render_time());
+    assert!(expanded_text.contains("Session log (2)"), "{expanded_text}");
+    assert!(!expanded_text.contains("of 2"), "{expanded_text}");
+    assert!(
+        expanded_text.contains("Read and perform the complete adversarial review"),
+        "{expanded_text}"
+    );
+}
+
+#[test]
+fn session_log_resume_error_renders_over_the_list() {
+    // If resume failure replaces the compact list, the operator loses the row they selected
+    // and cannot retry without reloading.
+    let mut app = session_log_app(ColorMode::Monochrome);
+    app.handle_input(InputKey::Enter, activity::selection().date);
+    app.apply_resume(Err(ApiError {
+        kind: ApiErrorKind::Protocol,
+        message: "cannot resume remote session".to_owned(),
+    }));
+
+    let text = render::to_text_at(&app, 120, 40, render_time());
+    assert!(text.contains("cannot resume remote session"), "{text}");
+    assert!(text.contains("Audit every Codex session"), "{text}");
+    assert!(text.contains("Untitled"), "{text}");
+}
+
+#[test]
+fn session_log_render_clips_long_titles_and_keeps_counts_visible() {
+    // If title clipping concatenates into the identity columns, a long first message can
+    // erase the message count and agent that operators use to scan.
+    let mut page: SessionLogPage =
+        serde_json::from_str(include_str!("fixtures/sessions.json")).unwrap();
+    page.sessions[0].display_name = Some(
+        "Audit every Codex session on activity or after the complete adversarial review of the remaining work"
+            .to_owned(),
+    );
+    let mut app = ready_app(ColorMode::Monochrome);
+    app.handle_input(InputKey::Char('o'), activity::selection().date);
+    app.apply_session_log(Ok(page), false);
+    let text = render::to_text_at(&app, 80, 24, render_time());
+
+    assert!(text.contains("…"), "{text}");
+    assert!(text.contains("21"), "{text}");
+    assert!(text.contains("Codex"), "{text}");
+    assert_width(&text, 80);
+}
+
+#[test]
+fn session_log_layouts_match_committed_goldens() {
+    // If compact, medium, or wide log layouts drift independently, operators lose titles,
+    // identity columns, or the leave path at one size while the others still look complete.
+    let app = session_log_app(ColorMode::Monochrome);
+    for (width, height, path) in [
+        (80, 24, "golden/session-log-80x24.txt"),
+        (120, 40, "golden/session-log-120x40.txt"),
+        (200, 50, "golden/session-log-200x50.txt"),
+    ] {
+        let text = render::to_text_at(&app, width, height, render_time());
+        assert_golden(path, &text);
+        assert_width(&text, width as usize);
+        assert!(text.contains("Session log"), "{path}\n{text}");
+        assert!(
+            text.contains("Esc  activity") || text.contains("Esc activity"),
+            "{path}\n{text}"
+        );
+        assert!(
+            text.contains("q  quit") || text.contains("q  close"),
+            "{path}\n{text}"
+        );
+    }
+}
+
+#[test]
+fn session_log_empty_and_failure_states_keep_recovery_visible() {
+    // If empty and failed logs reuse the Activity table copy, operators cannot tell a
+    // missing session list from a quiet day.
+    let mut empty = session_log_app(ColorMode::Monochrome);
+    empty.apply_session_log(
+        Ok(SessionLogPage {
+            sessions: Vec::new(),
+            next_cursor: None,
+            total: 0,
+        }),
+        false,
+    );
+    let empty_text = render::to_text_at(&empty, 80, 24, render_time());
+    assert!(
+        empty_text.contains("No sessions for 2026-08-08"),
+        "{empty_text}"
+    );
+
+    let mut failed = ready_app(ColorMode::Monochrome);
+    failed.handle_input(InputKey::Char('o'), activity::selection().date);
+    failed.apply_session_log(
+        Err(ApiError {
+            kind: ApiErrorKind::Network,
+            message: "could not reach AgentsView; check the API URL and network".to_owned(),
+        }),
+        false,
+    );
+    let failed_text = render::to_text_at(&failed, 80, 24, render_time());
+    assert!(
+        failed_text.contains("could not reach AgentsView"),
+        "{failed_text}"
+    );
+    assert!(failed_text.contains("r retry"), "{failed_text}");
 }
 
 fn assert_width(text: &str, width: usize) {

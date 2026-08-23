@@ -5,7 +5,7 @@
 use chrono::NaiveDate;
 use herdr_agentsview::wire::{
     AgentInfo, AgentsResponse, Automation, ProjectInfo, ProjectsResponse, Report, ReportSelection,
-    TimingQuality, ACTIVITY_SCHEMA_VERSION,
+    SessionLogEntry, SessionLogPage, SessionLogQuery, TimingQuality, ACTIVITY_SCHEMA_VERSION,
 };
 
 // Contract recorded from kenn-io/agentsview revision
@@ -203,4 +203,105 @@ fn report_selection_emits_only_supported_activity_filters() {
             ("automation", "automated".to_owned()),
         ]
     );
+}
+
+#[test]
+fn session_log_fixture_decodes_list_fields_without_inventing_titles() {
+    // If the session list contract loses title, identity, or relationship fields, the log
+    // cannot render the sidebar hierarchy the Activity dashboard is missing.
+    let page: SessionLogPage = serde_json::from_str(include_str!("fixtures/sessions.json"))
+        .expect("session list fixture must decode");
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.next_cursor.as_deref(), Some("opaque-cursor-1"));
+    assert_eq!(page.sessions.len(), 3);
+    assert_eq!(page.sessions[0].title(), "Audit every Codex session");
+    assert_eq!(page.sessions[0].agent_identity(), "Codex");
+    assert_eq!(page.sessions[0].machine_label(), Some("machine-alpha"));
+    assert_eq!(
+        page.sessions[1].parent_session_id.as_deref(),
+        Some("session-root-alpha")
+    );
+    assert_eq!(
+        page.sessions[1].relationship_type.as_deref(),
+        Some("subagent")
+    );
+    assert_eq!(page.sessions[2].title(), "Untitled");
+    assert!(page.sessions[2].machine_label().is_none());
+    assert!(page.sessions[2].is_teammate);
+    assert!(page.sessions[2].is_automated);
+}
+
+#[test]
+fn session_log_page_ignores_additive_unknown_fields() {
+    // Session list is additive-only. Rejecting a newly added field would make the log
+    // unavailable while Activity still loads.
+    let mut value: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/sessions.json")).unwrap();
+    value["sessions"][0]["unexpected"] = serde_json::json!(true);
+    value["extra_page_field"] = serde_json::json!("ok");
+
+    let page = serde_json::from_value::<SessionLogPage>(value)
+        .expect("unknown session list fields must be ignored");
+    assert_eq!(page.sessions[0].id, "session-root-alpha");
+}
+
+#[test]
+fn session_log_query_emits_only_supported_list_filters() {
+    // If query construction invents git_branch tokens or omits include_children, the list
+    // either 400s or hides the relationship rows the log needs to render.
+    let selection = ReportSelection::new(
+        NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+        "America/New_York".parse().unwrap(),
+    )
+    .with_project("project-alpha")
+    .with_agent("codex")
+    .with_machine("machine-alpha")
+    .with_automation(Automation::All);
+    let query = SessionLogQuery::from_selection(&selection).with_cursor("opaque-cursor-1");
+
+    assert_eq!(
+        query.query_pairs(),
+        vec![
+            ("date", "2026-08-08".to_owned()),
+            ("timezone", "America/New_York".to_owned()),
+            ("include_one_shot", "true".to_owned()),
+            ("include_children", "true".to_owned()),
+            ("order_by", "recent".to_owned()),
+            ("limit", "200".to_owned()),
+            ("project", "project-alpha".to_owned()),
+            ("agent", "codex".to_owned()),
+            ("machine", "machine-alpha".to_owned()),
+            ("include_automated", "true".to_owned()),
+            ("cursor", "opaque-cursor-1".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn interactive_session_log_query_omits_include_automated() {
+    // The list endpoint has no automated-only flag. Interactive must rely on the default
+    // exclusion rather than a made-up query parameter.
+    let selection = ReportSelection::new(
+        NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+        "America/New_York".parse().unwrap(),
+    )
+    .with_automation(Automation::Interactive);
+
+    assert!(!SessionLogQuery::from_selection(&selection)
+        .query_pairs()
+        .iter()
+        .any(|(key, _)| *key == "include_automated"));
+}
+
+#[test]
+fn untitled_session_uses_first_message_before_the_placeholder() {
+    // Display name is optional. Dropping first_message would leave most log rows untitled.
+    let entry = SessionLogEntry {
+        id: "session-preview".to_owned(),
+        first_message: Some("Use the ideate skill to...".to_owned()),
+        created_at: "2026-08-08T12:00:00Z".to_owned(),
+        ..SessionLogEntry::default()
+    };
+    assert_eq!(entry.title(), "Use the ideate skill to...");
 }

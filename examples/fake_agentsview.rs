@@ -14,7 +14,9 @@ use anyhow::{bail, Context};
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use clap::Parser;
-use herdr_agentsview::wire::{AgentInfo, Bucket, Money, ProjectInfo, Report, SessionRow};
+use herdr_agentsview::wire::{
+    AgentInfo, Bucket, Money, ProjectInfo, Report, SessionLogPage, SessionRow,
+};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -24,6 +26,7 @@ const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v6.json")
 const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v6.json");
 const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v6.json");
 const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v6.json");
+const SESSIONS: &str = include_str!("../tests/fixtures/sessions.json");
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 #[derive(Parser)]
@@ -119,6 +122,29 @@ async fn serve(
     let mut fields = request_line.split_whitespace();
     let method = fields.next().context("request has no method")?;
     let target = fields.next().context("request has no target")?;
+    let url =
+        Url::parse(&format!("http://127.0.0.1{target}")).context("parse fake request target")?;
+    if method == "POST" {
+        if let Some(session_id) = resume_session_id(url.path()) {
+            let body = serde_json::json!({
+                "launched": false,
+                "command": format!("echo resumed {session_id}"),
+                "cwd": "/tmp",
+            });
+            return write_json_response(
+                &mut stream,
+                "200 OK",
+                &serde_json::to_string(&body).context("encode fake resume")?,
+            )
+            .await;
+        }
+        return write_json_response(
+            &mut stream,
+            "405 Method Not Allowed",
+            r#"{"error":"method not allowed"}"#,
+        )
+        .await;
+    }
     if method != "GET" {
         return write_json_response(
             &mut stream,
@@ -128,8 +154,6 @@ async fn serve(
         .await;
     }
 
-    let url =
-        Url::parse(&format!("http://127.0.0.1{target}")).context("parse fake request target")?;
     let query = url.query_pairs().into_owned().collect::<BTreeMap<_, _>>();
     let session_report_id = session_report_id(url.path());
     let (status, body) = match url.path() {
@@ -189,9 +213,19 @@ async fn serve(
             })
             .context("encode fake machine metadata")?,
         ),
+        "/api/v1/sessions" => (
+            "200 OK",
+            session_log_body(&query).context("encode fake session log")?,
+        ),
         _ => ("404 Not Found", r#"{"error":"route not found"}"#.to_owned()),
     };
     write_json_response(&mut stream, status, &body).await
+}
+
+fn resume_session_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/v1/sessions/")
+        .and_then(|value| value.strip_suffix("/resume"))
+        .filter(|value| !value.is_empty() && !value.contains('/'))
 }
 
 fn session_report_id(path: &str) -> Option<&str> {
@@ -341,6 +375,35 @@ fn scenario_for_query(query: &BTreeMap<String, String>) -> ReportScenario {
     } else {
         ReportScenario::Empty
     }
+}
+
+fn session_log_body(query: &BTreeMap<String, String>) -> anyhow::Result<String> {
+    let mut page: SessionLogPage =
+        serde_json::from_str(SESSIONS).context("decode committed session log fixture")?;
+    if let Some(project) = query.get("project") {
+        page.sessions.retain(|session| session.project == *project);
+    }
+    if let Some(agent) = query.get("agent") {
+        page.sessions.retain(|session| session.agent == *agent);
+    }
+    if let Some(machine) = query.get("machine") {
+        page.sessions.retain(|session| session.machine == *machine);
+    }
+    if query.get("include_automated").map(String::as_str) != Some("true") {
+        page.sessions.retain(|session| !session.is_automated);
+    }
+    page.total = page
+        .sessions
+        .iter()
+        .filter(|session| {
+            session
+                .parent_session_id
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
+        })
+        .count();
+    serde_json::to_string(&page).context("encode filtered session log")
 }
 
 fn align_report_date(
