@@ -86,25 +86,27 @@ fn bucket_input_tokens_decode_on_schema_v6() {
 }
 
 #[test]
-fn unknown_contract_field_is_rejected() {
-    // If a same-version response grows silently, strict decoding must force an explicit
-    // compatibility decision rather than dropping data the UI may need.
+fn unknown_contract_field_does_not_fail_decode() {
+    // Additive same-version keys must leave the rest of the report usable. Collection of
+    // unused paths happens at the HTTP decoder, not on a bare serde_json value.
     let mut value: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     value["unexpected"] = serde_json::json!(true);
 
-    assert!(serde_json::from_value::<Report>(value).is_err());
+    let report = serde_json::from_value::<Report>(value)
+        .expect("additive fields must not fail schema v6 decode");
+    assert_eq!(report.schema_version, ACTIVITY_SCHEMA_VERSION);
 }
 
 #[test]
-fn removed_v5_intervals_field_is_rejected() {
-    // If the v6 decoder silently accepts the removed intervals field, a mislabeled v5 payload
-    // can bypass the exact contract decision and revive obsolete client-side slicing.
+fn removed_v5_intervals_field_does_not_fail_v6_decode() {
+    // A v6 payload that still carries the removed intervals key is an additive leftover,
+    // not a mislabeled v5 report. Schema version still rejects an actual v5 body.
     let mut value: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     value["intervals"] = serde_json::json!([]);
 
-    assert!(serde_json::from_value::<Report>(value).is_err());
+    serde_json::from_value::<Report>(value).expect("leftover intervals must not fail v6 decode");
 }
 
 #[test]
@@ -119,17 +121,25 @@ fn invalid_report_timezone_is_rejected_at_the_wire_boundary() {
 }
 
 #[test]
-fn unknown_nested_field_and_closed_enum_are_rejected() {
-    // If a session row or closed enum changes under schema v6, accepting it would make
-    // sorting and timing-quality behavior silently incomplete.
-    let fixture: serde_json::Value =
+fn unknown_nested_field_does_not_fail_decode() {
+    // Additive keys on a session row must not drop the rest of the report. Unknown closed
+    // enum values remain a contract break because they change modeled behavior.
+    let mut extra_field: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
-    let mut extra_field = fixture.clone();
     extra_field["by_session"][0]["unexpected"] = serde_json::json!(true);
-    let mut new_enum = fixture;
+
+    serde_json::from_value::<Report>(extra_field)
+        .expect("additive session fields must not fail schema v6 decode");
+}
+
+#[test]
+fn unknown_closed_enum_is_rejected() {
+    // If a closed enum grows under schema v6, accepting it would make sorting and
+    // timing-quality behavior silently incomplete.
+    let mut new_enum: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/report-v6.json")).unwrap();
     new_enum["by_session"][0]["timing_quality"] = serde_json::json!("estimated");
 
-    assert!(serde_json::from_value::<Report>(extra_field).is_err());
     assert!(serde_json::from_value::<Report>(new_enum).is_err());
 }
 
