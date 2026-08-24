@@ -182,7 +182,8 @@ impl ActivityClient {
             query.push(("bucket", bucket.to_string()));
         }
         let body = self.get_endpoint(endpoint, &query).await?;
-        decode_contract(&body, "schema v6 Activity session-page")
+        let (page, _) = decode_contract::<SessionPage>(&body, "schema v6 Activity session-page")?;
+        Ok(page)
     }
 
     async fn hydrate_report(&self, mut report: Report) -> Result<Report, ApiError> {
@@ -349,12 +350,28 @@ fn decode_report(body: &[u8]) -> Result<Report, ApiError> {
             "unsupported Activity schema version {version}; expected {ACTIVITY_SCHEMA_VERSION}"
         )));
     }
-    decode_contract(body, "schema v6")
+    let (mut report, unused) = decode_contract::<Report>(body, "schema v6")?;
+    report.unused_fields = unused;
+    Ok(report)
 }
 
-fn decode_contract<T: DeserializeOwned>(body: &[u8], contract: &str) -> Result<T, ApiError> {
+fn decode_contract<T: DeserializeOwned>(
+    body: &[u8],
+    contract: &str,
+) -> Result<(T, Vec<String>), ApiError> {
+    let mut unused = BTreeSet::new();
     let mut deserializer = serde_json::Deserializer::from_slice(body);
-    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+    let mut collect = |path: serde_ignored::Path<'_>| {
+        let rendered = unused_field_path(&path);
+        if !rendered.is_empty() {
+            unused.insert(rendered);
+        }
+    };
+    let value = serde_path_to_error::deserialize(serde_ignored::Deserializer::new(
+        &mut deserializer,
+        &mut collect,
+    ))
+    .map_err(|error| {
         let path = safe_contract_path(error.path());
         let message = format!("AgentsView response does not match the {contract} contract");
         if path.is_empty() {
@@ -362,7 +379,8 @@ fn decode_contract<T: DeserializeOwned>(body: &[u8], contract: &str) -> Result<T
         } else {
             ApiError::protocol(format!("{message} at {path}"))
         }
-    })
+    })?;
+    Ok((value, unused.into_iter().collect()))
 }
 
 fn validate_report_contract(report: &Report) -> Result<(), ApiError> {
@@ -700,6 +718,55 @@ fn safe_contract_path(path: &Path) -> String {
         }
     }
     safe_excerpt(rendered.as_bytes())
+}
+
+enum IgnoredSegment {
+    Map(String),
+    Seq(usize),
+}
+
+fn unused_field_path(path: &serde_ignored::Path<'_>) -> String {
+    let mut segments = Vec::new();
+    collect_ignored_segments(path, &mut segments);
+    let mut rendered = String::new();
+    let mut redact_next_map_key = false;
+    for segment in segments {
+        let redact_this_map_key = std::mem::take(&mut redact_next_map_key);
+        match segment {
+            IgnoredSegment::Seq(index) => rendered.push_str(&format!("[{index}]")),
+            IgnoredSegment::Map(key) => {
+                if redact_this_map_key {
+                    rendered.push_str("[*]");
+                    continue;
+                }
+                if !rendered.is_empty() {
+                    rendered.push('.');
+                }
+                rendered.push_str(&safe_excerpt(key.as_bytes()));
+                redact_next_map_key = matches!(key.as_str(), "models" | "projects");
+            }
+        }
+    }
+    safe_excerpt(rendered.as_bytes())
+}
+
+fn collect_ignored_segments(path: &serde_ignored::Path<'_>, segments: &mut Vec<IgnoredSegment>) {
+    match path {
+        serde_ignored::Path::Root => {}
+        serde_ignored::Path::Seq { parent, index } => {
+            collect_ignored_segments(parent, segments);
+            segments.push(IgnoredSegment::Seq(*index));
+        }
+        serde_ignored::Path::Map { parent, key } => {
+            collect_ignored_segments(parent, segments);
+            segments.push(IgnoredSegment::Map(key.clone()));
+        }
+        serde_ignored::Path::Some { parent }
+        | serde_ignored::Path::NewtypeStruct { parent }
+        | serde_ignored::Path::NewtypeVariant { parent } => {
+            collect_ignored_segments(parent, segments);
+        }
+    }
 }
 
 #[cfg(test)]
