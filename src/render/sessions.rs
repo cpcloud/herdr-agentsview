@@ -517,7 +517,7 @@ mod tests {
         // If bucket preview ignores the server's exact membership page, the rows below the
         // chart can claim activity that did not occur in the inspected interval.
         let report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         let bucket_rows = vec![report.by_session[0].clone()];
         let mut app = app_with_report(report);
         app.set_focus(Focus::Timeline);
@@ -601,7 +601,7 @@ mod tests {
         // If the client approximates membership from a session window, an idle session can
         // appear in a bucket even though AgentsView deliberately omitted it from the page.
         let report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         let bucket_rows = vec![report.by_session[1].clone()];
         let mut app = app_with_report(report);
         app.toggle_timeline_inspection();
@@ -728,7 +728,7 @@ mod tests {
         // If a future bucket falls through to ordinary overlap filtering, the Sessions pane
         // can claim rows in a time range the report has not observed.
         let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         report.effective_end = report.buckets[0].end;
         report.elapsed_bucket_count = 1;
         let mut app = app_with_report(report);
@@ -753,7 +753,7 @@ mod tests {
 
     fn ready_app() -> App {
         let report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         app_with_report(report)
     }
 

@@ -84,10 +84,13 @@ pub fn empty_app(color_mode: ColorMode) -> App {
     value.totals.cost = Money { microdollars: 0 };
     value.totals.automated_agent_minutes = 0.0;
     value.totals.interactive_agent_minutes = 0.0;
+    value.totals.subagent_agent_minutes = 0.0;
     value.totals.automated_cost = Money { microdollars: 0 };
     value.totals.interactive_cost = Money { microdollars: 0 };
+    value.totals.subagent_cost = Money { microdollars: 0 };
     value.totals.automated_sessions = 0;
     value.totals.interactive_sessions = 0;
+    value.totals.subagent_sessions = 0;
     value.by_project.clear();
     value.by_model.clear();
     value.by_agent.clear();
@@ -95,12 +98,16 @@ pub fn empty_app(color_mode: ColorMode) -> App {
     value.sessions_total = 0;
     for bucket in &mut value.buckets {
         bucket.max_agents = 0;
+        bucket.max_interactive_agents = 0;
+        bucket.max_subagent_agents = 0;
+        bucket.max_automated_agents = 0;
         bucket.agent_minutes = 0.0;
         bucket.input_tokens = 0;
         bucket.output_tokens = 0;
         bucket.cost = Money { microdollars: 0 };
-        bucket.automated_at_peak = 0;
         bucket.interactive_at_peak = 0;
+        bucket.subagent_at_peak = 0;
+        bucket.automated_at_peak = 0;
     }
     app_with_report(value, color_mode)
 }
@@ -150,48 +157,49 @@ fn expanded_report() -> Report {
     let mut value = report();
     let start: DateTime<FixedOffset> = "2026-08-08T00:00:00-04:00".parse().unwrap();
     let levels = [
-        (0, 0),
-        (0, 0),
-        (0, 0),
-        (0, 0),
-        (1, 0),
-        (2, 1),
-        (3, 1),
-        (4, 2),
-        (5, 2),
-        (4, 3),
-        (5, 1),
-        (3, 2),
-        (4, 1),
-        (2, 1),
-        (0, 0),
-        (0, 0),
-        (2, 0),
-        (3, 1),
-        (2, 2),
-        (1, 1),
-        (0, 0),
-        (0, 0),
-        (1, 0),
-        (0, 0),
-        (0, 0),
-        (2, 1),
-        (3, 2),
-        (4, 2),
-        (3, 1),
-        (2, 1),
-        (1, 0),
-        (0, 0),
+        (0, 0, 0),
+        (0, 0, 0),
+        (0, 0, 0),
+        (0, 0, 0),
+        (1, 0, 0),
+        (2, 0, 1),
+        (3, 0, 1),
+        (4, 1, 2),
+        (5, 0, 2),
+        (3, 1, 3),
+        (5, 0, 1),
+        (3, 0, 2),
+        (4, 0, 1),
+        (2, 0, 1),
+        (0, 0, 0),
+        (0, 0, 0),
+        (2, 0, 0),
+        (3, 0, 1),
+        (1, 1, 2),
+        (1, 0, 1),
+        (0, 0, 0),
+        (0, 0, 0),
+        (1, 0, 0),
+        (0, 0, 0),
+        (0, 0, 0),
+        (2, 0, 1),
+        (3, 0, 2),
+        (4, 0, 2),
+        (3, 0, 1),
+        (2, 0, 1),
+        (1, 0, 0),
+        (0, 0, 0),
     ];
     let template = value.buckets[0].clone();
     value.buckets = levels
         .iter()
         .enumerate()
-        .map(|(index, (interactive, automated))| {
+        .map(|(index, (interactive, subagent, automated))| {
             bucket(
                 &template,
                 start + chrono::Duration::minutes(index as i64 * 45),
                 *interactive,
+                *subagent,
                 *automated,
             )
         })
@@ -226,18 +234,24 @@ fn bucket(
     template: &Bucket,
     start: DateTime<FixedOffset>,
     interactive: usize,
+    subagent: usize,
     automated: usize,
 ) -> Bucket {
+    let agents = interactive + subagent + automated;
     let mut value = template.clone();
     value.start = start;
     value.end = start + chrono::Duration::minutes(45);
-    value.max_agents = interactive + automated;
-    value.agent_minutes = (interactive + automated) as f64 * 30.0;
-    value.output_tokens = (interactive + automated) as u64 * 100;
+    value.max_agents = agents;
+    value.max_interactive_agents = interactive;
+    value.max_subagent_agents = subagent;
+    value.max_automated_agents = automated;
+    value.agent_minutes = agents as f64 * 30.0;
+    value.output_tokens = agents as u64 * 100;
     value.cost = Money {
-        microdollars: (interactive + automated) as i64 * 250_000,
+        microdollars: agents as i64 * 250_000,
     };
     value.interactive_at_peak = interactive;
+    value.subagent_at_peak = subagent;
     value.automated_at_peak = automated;
     value
 }

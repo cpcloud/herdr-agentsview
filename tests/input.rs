@@ -440,7 +440,7 @@ fn unavailable_timeline_does_not_advertise_an_inert_slice() {
 
 #[test]
 fn report_without_a_page_id_keeps_timeline_slicing_unavailable() {
-    // If the valid v6 fallback without report_id advertises slicing, Enter replaces a populated
+    // If the valid v8 fallback without report_id advertises slicing, Enter replaces a populated
     // session table with an empty slice that no server request can ever fill.
     let mut value = activity_support::report();
     value.report_id = None;

@@ -17,7 +17,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-const REPORT: &str = include_str!("fixtures/report-v6.json");
+const REPORT: &str = include_str!("fixtures/report-v8.json");
 const PROJECTS: &str = r#"{"projects":[{"name":"project-alpha","session_count":2}]}"#;
 const AGENTS: &str = r#"{"agents":[{"name":"codex","session_count":2}]}"#;
 const MACHINES: &str = r#"{"machines":["machine-alpha"]}"#;
@@ -264,8 +264,8 @@ async fn initial_load_requests_report_and_all_metadata() {
 }
 
 #[tokio::test]
-async fn timeline_inspection_loads_the_exact_v6_bucket_page() {
-    // If the runtime drops the v6 session-page command, timeline inspection stays empty even
+async fn timeline_inspection_loads_the_exact_v8_bucket_page() {
+    // If the runtime drops the v8 session-page command, timeline inspection stays empty even
     // though the report itself loaded successfully and no schema mismatch is visible.
     let server = RecordingServer::start().await;
     let config = server.config(Duration::from_secs(60));
@@ -294,9 +294,9 @@ async fn timeline_inspection_loads_the_exact_v6_bucket_page() {
         .paths()
         .into_iter()
         .find(|path| path.contains("/sessions"))
-        .expect("record v6 session-page request");
+        .expect("record v8 session-page request");
     assert!(path.starts_with("/api/v1/activity/report/fixture-report-id/sessions?"));
-    assert!(path.contains("bucket=0"));
+    assert!(path.contains("bucket_start=0&bucket_end=1"));
 }
 
 #[tokio::test]

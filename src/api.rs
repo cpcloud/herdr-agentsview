@@ -179,10 +179,11 @@ impl ActivityClient {
         } else if let Some(bucket) = bucket {
             query.push(("sort", "agent_minutes".to_owned()));
             query.push(("direction", "desc".to_owned()));
-            query.push(("bucket", bucket.to_string()));
+            query.push(("bucket_start", bucket.to_string()));
+            query.push(("bucket_end", (bucket + 1).to_string()));
         }
         let body = self.get_endpoint(endpoint, &query).await?;
-        let (page, _) = decode_contract::<SessionPage>(&body, "schema v6 Activity session-page")?;
+        let (page, _) = decode_contract::<SessionPage>(&body, "schema v8 Activity session-page")?;
         Ok(page)
     }
 
@@ -350,7 +351,7 @@ fn decode_report(body: &[u8]) -> Result<Report, ApiError> {
             "unsupported Activity schema version {version}; expected {ACTIVITY_SCHEMA_VERSION}"
         )));
     }
-    let (mut report, unused) = decode_contract::<Report>(body, "schema v6")?;
+    let (mut report, unused) = decode_contract::<Report>(body, "schema v8")?;
     report.unused_fields = unused;
     Ok(report)
 }

@@ -54,6 +54,7 @@ pub(super) fn render(
     };
     let number = palette.summary_number();
     let interactive = palette.summary_interactive();
+    let subagent = palette.summary_subagent();
     let automated = palette.summary_automated();
     let separator = palette.muted();
     let metrics = [
@@ -97,6 +98,14 @@ pub(super) fn render(
                         format_count(report.totals.interactive_sessions as i128)
                     ),
                     interactive,
+                ),
+                Span::styled(" + ", separator),
+                Span::styled(
+                    format!(
+                        "{} sub",
+                        format_count(report.totals.subagent_sessions as i128)
+                    ),
+                    subagent,
                 ),
                 Span::styled(" + ", separator),
                 Span::styled(
@@ -350,7 +359,7 @@ mod tests {
             "▲ 13 @ 07:34",
             "● 2h04  ○ 6h33",
             "◷ ~1.2k / $355.11",
-            "69 = 60 int + 9 auto · 38 unt",
+            "69 = 60 int + 0 sub + 9 auto · 38 unt",
             "7 · 3 models",
         ] {
             assert!(values.contains(metric), "missing {metric:?}\n{values}");
@@ -427,7 +436,7 @@ mod tests {
 
     fn fixture_app(color_mode: ColorMode) -> App {
         let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         report.peak.agents = 13;
         report.peak.at = Some("2026-08-19T07:34:00-04:00".parse().unwrap());
         report.totals.active_minutes = 124.0;

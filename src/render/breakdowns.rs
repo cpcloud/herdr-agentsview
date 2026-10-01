@@ -7,12 +7,12 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
-use crate::app::{App, BreakdownCategory, BreakdownValue, ColorMode, Focus};
+use crate::app::{App, BreakdownCategory, BreakdownValue, Focus};
 use crate::wire::KeyMinutes;
 
 use super::layout::LayoutClass;
 use super::status;
-use super::style::{clip_with_ellipsis, pad_right, Palette};
+use super::style::{clip_with_ellipsis, pad_right, ActivityClass, Palette};
 use super::summary::{format_compact_count, format_usd};
 
 pub(super) fn render(
@@ -154,7 +154,7 @@ fn breakdown_line(
     value_width: usize,
     palette: Palette,
 ) -> Line<'static> {
-    let (total, interactive, automated) = metric(row, value);
+    let (total, [interactive, subagent, automated]) = metric(row, value);
     let label = breakdown_value_label(row, value);
     let key_width = (width / 3).clamp(8, 18);
     let bar_width = width
@@ -167,30 +167,33 @@ fn breakdown_line(
         ((total / maximum) * bar_width as f64).round().max(1.0) as usize
     }
     .min(bar_width);
-    let split_total = interactive + automated;
-    let automated_cells = if total_cells == 0 || split_total <= 0.0 {
-        0
-    } else {
-        ((automated / split_total) * total_cells as f64).round() as usize
-    }
-    .min(total_cells);
-    let interactive_cells = total_cells - automated_cells;
-    let automated_symbol = if palette.mode() == ColorMode::Monochrome {
-        "▓"
-    } else {
-        "█"
+    let split_total = interactive + subagent + automated;
+    // Bars stack bottom-up, so cells are measured down from the automated end.
+    let cells_from_end = |share: f64| {
+        if total_cells == 0 || split_total <= 0.0 {
+            0
+        } else {
+            ((share / split_total) * total_cells as f64).round() as usize
+        }
+        .min(total_cells)
     };
-    Line::from(vec![
-        Span::raw(pad_right(&row.key, key_width)),
-        Span::raw(" "),
-        Span::styled("█".repeat(interactive_cells), palette.interactive()),
-        Span::styled(
-            automated_symbol.repeat(automated_cells),
-            palette.automated(),
-        ),
-        Span::raw(" "),
-        Span::raw(pad_right(&label, value_width)),
-    ])
+    let automated_cells = cells_from_end(automated);
+    let subagent_cells = cells_from_end(automated + subagent) - automated_cells;
+    let interactive_cells = total_cells - automated_cells - subagent_cells;
+    let mut spans = vec![Span::raw(pad_right(&row.key, key_width)), Span::raw(" ")];
+    for (class, cells) in
+        ActivityClass::ALL
+            .into_iter()
+            .zip([interactive_cells, subagent_cells, automated_cells])
+    {
+        spans.push(Span::styled(
+            palette.activity_symbol(class).repeat(cells),
+            palette.activity(class),
+        ));
+    }
+    spans.push(Span::raw(" "));
+    spans.push(Span::raw(pad_right(&label, value_width)));
+    Line::from(spans)
 }
 
 fn breakdown_value_width(rows: &[KeyMinutes], value: BreakdownValue) -> usize {
@@ -208,17 +211,24 @@ fn breakdown_value_label(row: &KeyMinutes, value: BreakdownValue) -> String {
     }
 }
 
-fn metric(row: &KeyMinutes, value: BreakdownValue) -> (f64, f64, f64) {
+/// Returns the row total and its split in [`ActivityClass::ALL`] order.
+fn metric(row: &KeyMinutes, value: BreakdownValue) -> (f64, [f64; 3]) {
     match value {
         BreakdownValue::AgentMinutes => (
             row.agent_minutes,
-            row.interactive_agent_minutes,
-            row.automated_agent_minutes,
+            [
+                row.interactive_agent_minutes,
+                row.subagent_agent_minutes,
+                row.automated_agent_minutes,
+            ],
         ),
         BreakdownValue::Cost => (
             row.cost.microdollars as f64,
-            row.interactive_cost.microdollars as f64,
-            row.automated_cost.microdollars as f64,
+            [
+                row.interactive_cost.microdollars as f64,
+                row.subagent_cost.microdollars as f64,
+                row.automated_cost.microdollars as f64,
+            ],
         ),
     }
 }
@@ -289,8 +299,10 @@ mod tests {
                 cost: Money { microdollars: 0 },
                 automated_agent_minutes: 0.0,
                 interactive_agent_minutes: minutes,
+                subagent_agent_minutes: 0.0,
                 automated_cost: Money { microdollars: 0 },
                 interactive_cost: Money { microdollars: 0 },
+                subagent_cost: Money { microdollars: 0 },
             };
 
             let line = breakdown_line(
@@ -320,8 +332,10 @@ mod tests {
             cost,
             automated_agent_minutes: 0.0,
             interactive_agent_minutes: 0.0,
+            subagent_agent_minutes: 0.0,
             automated_cost: Money { microdollars: 0 },
             interactive_cost: cost,
+            subagent_cost: Money { microdollars: 0 },
         }
     }
 
@@ -329,7 +343,7 @@ mod tests {
         line.spans
             .iter()
             .flat_map(|span| span.content.chars())
-            .filter(|character| matches!(character, '█' | '▓'))
+            .filter(|character| matches!(character, '█' | '░' | '▓'))
             .count()
     }
 }

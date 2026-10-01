@@ -35,7 +35,7 @@ presenting a row of unrelated cards:
 - concurrency: peak value and time
 - time: active and idle duration
 - work: agent-minutes and cost
-- sessions: total plus interactive, automated, and untimed counts
+- sessions: total plus interactive, subagent, automated, and untimed counts
 - scope: project and model counts
 
 The concurrency chart keeps the full selected day visible. A separate bucket

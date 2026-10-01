@@ -20,10 +20,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
-const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v6.json");
-const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v6.json");
-const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v6.json");
-const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v6.json");
+const READY_REPORT: &str = include_str!("../tests/fixtures/report-demo-v8.json");
+const PROJECT_ALPHA_REPORT: &str = include_str!("../tests/fixtures/report-project-alpha-v8.json");
+const AUTOMATED_REPORT: &str = include_str!("../tests/fixtures/report-automated-v8.json");
+const EMPTY_REPORT: &str = include_str!("../tests/fixtures/report-empty-v8.json");
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 #[derive(Parser)]
@@ -217,11 +217,14 @@ fn session_page(
     report_id: &str,
     query: &BTreeMap<String, String>,
 ) -> anyhow::Result<Option<SessionPageBody>> {
-    let bucket_index = query
-        .get("bucket")
-        .context("fake session-page request is missing bucket")?
-        .parse::<usize>()
-        .context("parse fake session-page bucket")?;
+    let bucket_bound = |name: &str| {
+        query
+            .get(name)
+            .with_context(|| format!("fake session-page request is missing {name}"))?
+            .parse::<usize>()
+            .with_context(|| format!("parse fake session-page {name}"))
+    };
+    let (bucket_start, bucket_end) = (bucket_bound("bucket_start")?, bucket_bound("bucket_end")?);
     let reports = state
         .reports
         .lock()
@@ -229,14 +232,19 @@ fn session_page(
     let Some(report) = reports.get(report_id) else {
         return Ok(None);
     };
-    let bucket = report
+    let buckets = report
         .buckets
-        .get(bucket_index)
-        .context("fake session-page bucket is outside the report")?;
+        .get(bucket_start..bucket_end)
+        .filter(|buckets| !buckets.is_empty())
+        .context("fake session-page bucket range is outside the report")?;
     let sessions = report
         .by_session
         .iter()
-        .filter(|session| session_overlaps_bucket(session, bucket))
+        .filter(|session| {
+            buckets
+                .iter()
+                .any(|bucket| session_overlaps_bucket(session, bucket))
+        })
         .cloned()
         .collect::<Vec<_>>();
     let total = sessions.len();
@@ -469,12 +477,16 @@ fn expand_report_to_local_day(report: &mut Report) -> anyhow::Result<()> {
 fn empty_bucket(template: &Bucket) -> Bucket {
     let mut bucket = template.clone();
     bucket.max_agents = 0;
+    bucket.max_interactive_agents = 0;
+    bucket.max_subagent_agents = 0;
+    bucket.max_automated_agents = 0;
     bucket.agent_minutes = 0.0;
     bucket.input_tokens = 0;
     bucket.output_tokens = 0;
     bucket.cost = Money { microdollars: 0 };
-    bucket.automated_at_peak = 0;
     bucket.interactive_at_peak = 0;
+    bucket.subagent_at_peak = 0;
+    bucket.automated_at_peak = 0;
     bucket
 }
 
@@ -567,8 +579,8 @@ mod tests {
     use super::{scenario_for_query, scenario_report, serve, Args, ReportScenario, ServerState};
 
     #[tokio::test]
-    async fn v6_session_route_serves_bucket_specific_demo_rows() {
-        // If the fake server does not track the v6 session-page boundary, entering timeline
+    async fn v8_session_route_serves_bucket_specific_demo_rows() {
+        // If the fake server does not track the v8 session-page boundary, entering timeline
         // inspection turns an otherwise healthy packaged demo into an HTTP error.
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
@@ -609,14 +621,15 @@ mod tests {
 
         let inactive = client
             .get(format!(
-                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket=0"
+                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket_start=0&bucket_end=1"
             ))
             .send()
             .await
             .unwrap();
         let active = client
             .get(format!(
-                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket={active_bucket}"
+                "{base_url}/api/v1/activity/report/{report_id}/sessions?limit=500&sort=agent_minutes&direction=desc&bucket_start={active_bucket}&bucket_end={}",
+                active_bucket + 1
             ))
             .send()
             .await
