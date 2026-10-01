@@ -616,7 +616,7 @@ mod tests {
         let mut app = App::new(selection, Duration::from_secs(300));
         app.begin_foreground_load();
         let report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/report-v8.json")).unwrap();
         app.apply_report(
             Ok(Box::new(report)),
             "2026-08-08T17:21:00Z".parse().unwrap(),
@@ -670,7 +670,7 @@ mod tests {
             handle: tokio::spawn(std::future::pending()),
         });
         let mut first_report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/report-v8.json")).unwrap();
         first_report.totals.output_tokens = 41;
         runtime
             .sender
@@ -692,7 +692,7 @@ mod tests {
         assert!(app.report().is_none());
 
         let mut replacement_report: Report =
-            serde_json::from_str(include_str!("../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/report-v8.json")).unwrap();
         replacement_report.totals.output_tokens = 42;
         runtime
             .sender

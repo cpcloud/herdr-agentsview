@@ -22,7 +22,7 @@ mod http;
 
 use http::{RecordingServer, ResponsePlan};
 
-const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v6.json");
+const REPORT_FIXTURE: &str = include_str!("../../tests/fixtures/report-v8.json");
 const PROJECTS_FIXTURE: &str = include_str!("../../tests/fixtures/projects.json");
 const AGENTS_FIXTURE: &str = include_str!("../../tests/fixtures/agents.json");
 const MACHINES_FIXTURE: &str = include_str!("../../tests/fixtures/machines.json");
@@ -391,7 +391,7 @@ async fn malformed_json_is_a_protocol_error() {
 }
 
 #[tokio::test]
-async fn current_v6_report_reaches_the_client() {
+async fn current_v8_report_reaches_the_client() {
     // If standalone AgentsView advances its Activity contract while this strict client stays
     // stale, opening the dashboard fails before any report data reaches the app.
     let server = RecordingServer::start(ResponsePlan::json(REPORT_FIXTURE)).await;
@@ -404,13 +404,13 @@ async fn current_v6_report_reaches_the_client() {
 
     let report = client.fetch_report(&selection()).await.unwrap();
 
-    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.schema_version, 8);
     assert_eq!(report.by_session[0].session_id, "session-alpha");
 }
 
 #[tokio::test]
-async fn current_v6_report_hydrates_every_session_page_for_local_sorts() {
-    // If the v6 cursor is ignored, title and model sorts operate on only the bounded first
+async fn current_v8_report_hydrates_every_session_page_for_local_sorts() {
+    // If the v8 cursor is ignored, title and model sorts operate on only the bounded first
     // page even though the dashboard presents them as full-report sorts.
     let mut first: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     let remaining = first["by_session"].as_array_mut().unwrap().split_off(1);
@@ -453,7 +453,7 @@ async fn current_v6_report_hydrates_every_session_page_for_local_sorts() {
 }
 
 #[tokio::test]
-async fn report_rejects_disagreeing_v6_session_totals() {
+async fn report_rejects_disagreeing_v8_session_totals() {
     // If summary and paging totals can diverge, the header and session table describe
     // different populations even after every declared page has been loaded.
     let mut report: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
@@ -550,7 +550,8 @@ async fn bucket_sessions_use_the_exact_server_page_and_bucket_index() {
             ("limit".to_owned(), "500".to_owned()),
             ("sort".to_owned(), "agent_minutes".to_owned()),
             ("direction".to_owned(), "desc".to_owned()),
-            ("bucket".to_owned(), "7".to_owned()),
+            ("bucket_start".to_owned(), "7".to_owned()),
+            ("bucket_end".to_owned(), "8".to_owned()),
         ]
     );
 }
@@ -640,12 +641,12 @@ async fn report_schema_version_is_required_and_exact() {
     for (body, expected) in [
         (r#"{}"#, "missing schema_version"),
         (
-            r#"{"schema_version":5}"#,
-            "unsupported Activity schema version 5",
-        ),
-        (
             r#"{"schema_version":7}"#,
             "unsupported Activity schema version 7",
+        ),
+        (
+            r#"{"schema_version":9}"#,
+            "unsupported Activity schema version 9",
         ),
     ] {
         let server = RecordingServer::start(ResponsePlan::json(body)).await;
@@ -667,7 +668,7 @@ async fn report_schema_version_is_required_and_exact() {
 async fn well_formed_json_with_an_invalid_version_type_is_a_contract_error() {
     // If a valid JSON response with the wrong envelope type is called malformed JSON,
     // operators cannot distinguish transport corruption from an incompatible API.
-    let server = RecordingServer::start(ResponsePlan::json(r#"{"schema_version":"6"}"#)).await;
+    let server = RecordingServer::start(ResponsePlan::json(r#"{"schema_version":"8"}"#)).await;
     let client = ActivityClient::new(&config(
         server.base_url().clone(),
         None,
@@ -728,7 +729,7 @@ async fn unused_field_path_redacts_project_map_keys() {
 
 #[tokio::test]
 async fn same_version_nested_shape_error_identifies_the_contract_path() {
-    // If a nested field changes under schema v6, a generic mismatch leaves operators unable
+    // If a nested field changes under schema v8, a generic mismatch leaves operators unable
     // to distinguish an upstream contract change from a stale fixture without exposing data.
     let mut value: serde_json::Value = serde_json::from_str(REPORT_FIXTURE).unwrap();
     value["pricing"]["models"]["model-alpha"]["resolutions"][0]["bands"] =

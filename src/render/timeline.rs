@@ -9,10 +9,10 @@ use ratatui::widgets::{Paragraph, Widget};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, ColorMode, Focus};
-use crate::wire::Report;
+use crate::wire::{Bucket, Report};
 
 use super::layout::LayoutClass;
-use super::style::{clip_with_ellipsis, Palette};
+use super::style::{clip_with_ellipsis, ActivityClass, Palette};
 use super::time::{format_clock, format_interval};
 
 pub(super) fn render(
@@ -55,6 +55,11 @@ pub(super) fn render(
                 ),
                 Span::raw("  "),
                 Span::styled(
+                    format!("Subagent {}", bucket.subagent_at_peak),
+                    palette.subagent(),
+                ),
+                Span::raw("  "),
+                Span::styled(
                     format!("Automated {}", bucket.automated_at_peak),
                     palette.automated(),
                 ),
@@ -64,11 +69,15 @@ pub(super) fn render(
             ColorMode::Color => Line::from(vec![
                 Span::styled("Interactive", palette.interactive()),
                 Span::raw("  "),
+                Span::styled("Subagent", palette.subagent()),
+                Span::raw("  "),
                 Span::styled("Automated", palette.automated()),
                 Span::raw("  · observed zero"),
             ]),
             ColorMode::Monochrome => Line::from(vec![
                 Span::styled("I Interactive", palette.interactive()),
+                Span::raw("  "),
+                Span::styled("S Subagent", palette.subagent()),
                 Span::raw("  "),
                 Span::styled("A Automated", palette.automated()),
                 Span::raw("  · observed zero"),
@@ -98,11 +107,7 @@ fn chart_peak(report: &Report) -> usize {
         .buckets
         .iter()
         .take(report.observed_bucket_count())
-        .map(|bucket| {
-            bucket
-                .interactive_at_peak
-                .saturating_add(bucket.automated_at_peak)
-        })
+        .map(Bucket::agents_at_peak)
         .max()
         .unwrap_or(0)
 }
@@ -253,33 +258,37 @@ fn render_chart(buffer: &mut Buffer, area: Rect, app: &App, palette: Palette) {
         };
         if let Some(bucket) = bucket {
             let stack = scaled_stack(
-                bucket.interactive_at_peak,
-                bucket.automated_at_peak,
+                [
+                    bucket.interactive_at_peak,
+                    bucket.subagent_at_peak,
+                    bucket.automated_at_peak,
+                ],
                 peak,
                 usize::from(area.height),
             );
-            let total_height = stack.interactive + stack.automated + usize::from(stack.mixed);
             for y_offset in 0..area.height {
                 let from_bottom = usize::from(area.height - y_offset - 1);
                 let cell = &mut buffer[(area.x + x_offset, area.y + y_offset)];
-                if total_height == 0 && from_bottom == 0 {
+                if stack.height() == 0 && from_bottom == 0 {
                     cell.set_symbol("·").set_style(palette.muted());
-                } else if stack.mixed && from_bottom == 0 {
-                    let symbol = if palette.mode() == ColorMode::Color {
-                        "▄"
-                    } else {
-                        "▒"
-                    };
-                    cell.set_symbol(symbol).set_style(palette.mixed_activity());
-                } else if from_bottom < stack.interactive {
-                    cell.set_symbol("█").set_style(palette.interactive());
-                } else if from_bottom < total_height {
-                    let symbol = if palette.mode() == ColorMode::Monochrome {
-                        "▓"
-                    } else {
-                        "█"
-                    };
-                    cell.set_symbol(symbol).set_style(palette.automated());
+                } else if let StackHeights::Mixed {
+                    height,
+                    lower,
+                    upper,
+                } = stack
+                {
+                    if from_bottom < height {
+                        let symbol = if palette.mode() == ColorMode::Color {
+                            "▄"
+                        } else {
+                            "▒"
+                        };
+                        cell.set_symbol(symbol)
+                            .set_style(palette.mixed_activity(lower, upper));
+                    }
+                } else if let Some(class) = stack.class_at(from_bottom) {
+                    cell.set_symbol(palette.activity_symbol(class))
+                        .set_style(palette.activity(class));
                 }
             }
         } else {
@@ -412,59 +421,89 @@ fn column_bucket(
         start + 1
     }
     .min(observed);
-    buckets[start..end].iter().max_by_key(|bucket| {
-        bucket
-            .interactive_at_peak
-            .saturating_add(bucket.automated_at_peak)
-    })
+    buckets[start..end]
+        .iter()
+        .max_by_key(|bucket| bucket.agents_at_peak())
 }
 
+/// One terminal column of the concurrency chart. Segment heights follow
+/// [`ActivityClass::ALL`] from the baseline up.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct StackHeights {
-    interactive: usize,
-    automated: usize,
-    mixed: bool,
+enum StackHeights {
+    Segments([usize; 3]),
+    /// Too few cells to give every present class its own; the glyph shows the lowest and
+    /// highest present classes.
+    Mixed {
+        height: usize,
+        lower: ActivityClass,
+        upper: ActivityClass,
+    },
 }
 
-fn scaled_stack(interactive: usize, automated: usize, peak: usize, height: usize) -> StackHeights {
-    let total = interactive.saturating_add(automated);
-    let total_height = scaled_height(total, peak, height);
-    if total_height == 0 {
-        return StackHeights {
-            interactive: 0,
-            automated: 0,
-            mixed: false,
-        };
-    }
-    match (interactive, automated, total_height) {
-        (0, _, _) => StackHeights {
-            interactive: 0,
-            automated: total_height,
-            mixed: false,
-        },
-        (_, 0, _) => StackHeights {
-            interactive: total_height,
-            automated: 0,
-            mixed: false,
-        },
-        (_, _, 1) => StackHeights {
-            interactive: 0,
-            automated: 0,
-            mixed: true,
-        },
-        _ => {
-            let rounded_interactive =
-                ((interactive as u128 * total_height as u128) + total as u128 / 2) / total as u128;
-            let interactive_height = usize::try_from(rounded_interactive)
-                .expect("scaled stack height is bounded by the terminal height")
-                .clamp(1, total_height - 1);
-            StackHeights {
-                interactive: interactive_height,
-                automated: total_height - interactive_height,
-                mixed: false,
-            }
+impl StackHeights {
+    fn height(self) -> usize {
+        match self {
+            Self::Segments(segments) => segments.iter().sum(),
+            Self::Mixed { height, .. } => height,
         }
     }
+
+    fn class_at(self, from_bottom: usize) -> Option<ActivityClass> {
+        let Self::Segments(segments) = self else {
+            return None;
+        };
+        let mut top = 0;
+        ActivityClass::ALL
+            .into_iter()
+            .zip(segments)
+            .find(|(_, segment)| {
+                top += segment;
+                from_bottom < top
+            })
+            .map(|(class, _)| class)
+    }
+}
+
+fn scaled_stack(counts: [usize; 3], peak: usize, height: usize) -> StackHeights {
+    let total = counts.iter().map(|count| *count as u128).sum::<u128>();
+    let total_height = scaled_height(usize::try_from(total).unwrap_or(usize::MAX), peak, height);
+    let mut segments = [0; 3];
+    if total_height == 0 {
+        return StackHeights::Segments(segments);
+    }
+    let present = ActivityClass::ALL
+        .into_iter()
+        .zip(counts)
+        .filter(|(_, count)| *count > 0)
+        .map(|(class, _)| class)
+        .collect::<Vec<_>>();
+    if present.len() > total_height {
+        return StackHeights::Mixed {
+            height: total_height,
+            lower: present[0],
+            upper: present[present.len() - 1],
+        };
+    }
+    // Rounding cumulative boundaries instead of each segment keeps the sum exact.
+    let mut cumulative = 0_u128;
+    let mut previous = 0;
+    for (segment, count) in segments.iter_mut().zip(counts) {
+        cumulative += count as u128;
+        let boundary = usize::try_from((cumulative * total_height as u128 + total / 2) / total)
+            .expect("scaled stack boundary is bounded by the terminal height");
+        *segment = boundary - previous;
+        previous = boundary;
+    }
+    for index in 0..segments.len() {
+        if counts[index] > 0 && segments[index] == 0 {
+            let tallest = (0..segments.len())
+                .max_by_key(|candidate| segments[*candidate])
+                .expect("a stack has segments");
+            segments[tallest] -= 1;
+            segments[index] = 1;
+        }
+    }
+    StackHeights::Segments(segments)
 }
 
 fn scaled_height(value: usize, peak: usize, height: usize) -> usize {
@@ -492,12 +531,12 @@ mod tests {
 
     use crate::app::{App, ColorMode, Focus};
     use crate::render::layout::LayoutClass;
-    use crate::render::style::Palette;
+    use crate::render::style::{ActivityClass, Palette};
     use crate::wire::{Bucket, Money, Report, ReportSelection};
 
     use super::{
         bucket_column_range, column_bucket, compact_y_axis_label, observed_columns, place_labels,
-        render_chart, scaled_stack, timeline_axis, y_axis_ticks,
+        render_chart, scaled_stack, timeline_axis, y_axis_ticks, StackHeights,
     };
 
     #[test]
@@ -652,21 +691,37 @@ mod tests {
     }
 
     #[test]
-    fn stack_scaling_preserves_total_and_both_activity_classes() {
+    fn stack_scaling_preserves_total_and_every_activity_class() {
         // If each segment rounds independently, a short stack can exceed its scaled total and
-        // clip away the Automated segment. One-cell stacks need an explicit mixed fallback.
-        let scaled = scaled_stack(9, 3, 12, 5);
-        assert_eq!(scaled.interactive + scaled.automated, 5);
-        assert!(scaled.interactive > 0);
-        assert!(scaled.automated > 0);
-        assert!(!scaled.mixed);
+        // clip away a small class. Stacks too short for every class need a mixed fallback.
+        assert_eq!(
+            scaled_stack([9, 0, 3], 12, 5),
+            StackHeights::Segments([4, 0, 1])
+        );
+        assert_eq!(
+            scaled_stack([1, 1, 100], 102, 3),
+            StackHeights::Segments([1, 1, 1])
+        );
 
-        let compact = scaled_stack(1, 1, 7, 1);
-        assert_eq!(compact.interactive + compact.automated, 0);
-        assert!(compact.mixed);
+        assert_eq!(
+            scaled_stack([1, 0, 1], 7, 1),
+            StackHeights::Mixed {
+                height: 1,
+                lower: ActivityClass::Interactive,
+                upper: ActivityClass::Automated,
+            }
+        );
+        assert_eq!(
+            scaled_stack([1, 1, 1], 3, 2),
+            StackHeights::Mixed {
+                height: 2,
+                lower: ActivityClass::Interactive,
+                upper: ActivityClass::Automated,
+            }
+        );
 
-        let hostile = scaled_stack(usize::MAX, usize::MAX, usize::MAX, 5);
-        assert!(hostile.interactive + hostile.automated <= 5);
+        let hostile = scaled_stack([usize::MAX, usize::MAX, usize::MAX], usize::MAX, 5);
+        assert_eq!(hostile.height(), 5);
     }
 
     #[test]
@@ -789,19 +844,23 @@ mod tests {
                 start: timestamp,
                 end: timestamp,
                 max_agents: 0,
+                max_interactive_agents: 0,
+                max_subagent_agents: 0,
+                max_automated_agents: 0,
                 agent_minutes: 0.0,
                 input_tokens: 0,
                 output_tokens: 0,
                 cost: Money { microdollars: 0 },
-                automated_at_peak: 0,
                 interactive_at_peak: 0,
+                subagent_at_peak: 0,
+                automated_at_peak: 0,
             };
             count
         ]
     }
 
     fn fixture_report() -> Report {
-        serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json"))
+        serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json"))
             .expect("fixture follows the report contract")
     }
 }

@@ -8,7 +8,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use chrono_tz::Tz;
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const ACTIVITY_SCHEMA_VERSION: u32 = 6;
+pub const ACTIVITY_SCHEMA_VERSION: u32 = 8;
 
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
@@ -151,6 +151,9 @@ pub struct Report {
     pub elapsed_bucket_count: usize,
     pub buckets: Vec<Bucket>,
     pub peak: Peak,
+    pub interactive_peak: Peak,
+    pub subagent_peak: Peak,
+    pub automated_peak: Peak,
     pub totals: Totals,
     pub by_project: Vec<KeyMinutes>,
     pub by_model: Vec<KeyMinutes>,
@@ -176,12 +179,7 @@ impl Report {
         self.buckets
             .iter()
             .take(observed)
-            .position(|bucket| {
-                bucket
-                    .interactive_at_peak
-                    .saturating_add(bucket.automated_at_peak)
-                    > 0
-            })
+            .position(|bucket| bucket.agents_at_peak() > 0)
             .unwrap_or(0)
     }
 
@@ -242,6 +240,7 @@ pub struct EffectiveModelRate {
     pub input_cost_per_mtok: Money,
     pub output_cost_per_mtok: Money,
     pub cache_write_cost_per_mtok: Money,
+    pub cache_write_1h_cost_per_mtok: Money,
     pub cache_read_cost_per_mtok: Money,
     pub cost_source: CostSource,
     #[serde(deserialize_with = "deserialize_null_default")]
@@ -255,6 +254,7 @@ pub struct PricingBand {
     pub input_cost_per_mtok: Money,
     pub output_cost_per_mtok: Money,
     pub cache_write_cost_per_mtok: Money,
+    pub cache_write_1h_cost_per_mtok: Money,
     pub cache_read_cost_per_mtok: Money,
 }
 
@@ -293,13 +293,25 @@ pub struct Bucket {
     pub start: DateTime<FixedOffset>,
     pub end: DateTime<FixedOffset>,
     pub max_agents: usize,
+    pub max_interactive_agents: usize,
+    pub max_subagent_agents: usize,
+    pub max_automated_agents: usize,
     pub agent_minutes: f64,
     #[serde(default)]
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost: Money,
-    pub automated_at_peak: usize,
     pub interactive_at_peak: usize,
+    pub subagent_at_peak: usize,
+    pub automated_at_peak: usize,
+}
+
+impl Bucket {
+    pub(crate) fn agents_at_peak(&self) -> usize {
+        self.interactive_at_peak
+            .saturating_add(self.subagent_at_peak)
+            .saturating_add(self.automated_at_peak)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -321,10 +333,13 @@ pub struct Totals {
     pub cost: Money,
     pub automated_agent_minutes: f64,
     pub interactive_agent_minutes: f64,
+    pub subagent_agent_minutes: f64,
     pub automated_cost: Money,
     pub interactive_cost: Money,
+    pub subagent_cost: Money,
     pub automated_sessions: usize,
     pub interactive_sessions: usize,
+    pub subagent_sessions: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -336,8 +351,10 @@ pub struct KeyMinutes {
     pub cost: Money,
     pub automated_agent_minutes: f64,
     pub interactive_agent_minutes: f64,
+    pub subagent_agent_minutes: f64,
     pub automated_cost: Money,
     pub interactive_cost: Money,
+    pub subagent_cost: Money,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -357,6 +374,7 @@ pub struct SessionRow {
     pub last_active: Option<DateTime<FixedOffset>>,
     pub timing_quality: TimingQuality,
     pub is_automated: bool,
+    pub is_subagent: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

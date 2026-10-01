@@ -168,7 +168,7 @@ mod tests {
         // If additive keys stay only in memory, operators cannot tell that AgentsView sent
         // fields this client does not model yet.
         let mut report: Report =
-            serde_json::from_str(include_str!("../../tests/fixtures/report-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/report-v8.json")).unwrap();
         report.unused_fields = vec!["unexpected".to_owned()];
         let mut app = App::new(
             ReportSelection::new(

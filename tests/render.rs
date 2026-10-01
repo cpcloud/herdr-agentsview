@@ -507,16 +507,18 @@ fn wide_breakdown_divider_preserves_the_selected_category_marker() {
 }
 
 #[test]
-fn monochrome_render_keeps_interactive_automated_focus_and_stacking_semantics() {
+fn monochrome_render_keeps_activity_class_focus_and_stacking_semantics() {
     // If color is the only differentiator, an operator in a low-capability terminal cannot
-    // distinguish the two concurrency sources or the focused region.
+    // distinguish the three concurrency sources or the focused region.
     let app = ready_app(ColorMode::Monochrome);
     let text = render::to_text_at(&app, 120, 40, render_time());
 
     assert_golden("golden/monochrome-120x40.txt", &text);
     assert!(text.contains("I Interactive"));
+    assert!(text.contains("S Subagent"));
     assert!(text.contains("A Automated"));
     assert!(text.contains('█'));
+    assert!(text.contains('░'));
     assert!(text.contains('▓'));
     assert_width(&text, 120);
 }
@@ -534,6 +536,7 @@ fn focused_timeline_names_the_inspected_bucket_and_concurrency_split() {
 
     assert!(text.contains("05:15-06:00"), "{text}");
     assert!(text.contains("Interactive 4"), "{text}");
+    assert!(text.contains("Subagent 1"), "{text}");
     assert!(text.contains("Automated 2"), "{text}");
     assert_width(&text, 120);
 }

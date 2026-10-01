@@ -26,6 +26,27 @@ impl TerminalCapabilities {
     }
 }
 
+/// Upstream assigns every session to exactly one class, and subagent takes precedence
+/// over the automation flag. Variants are in stacking order, bottom to top.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ActivityClass {
+    Interactive,
+    Subagent,
+    Automated,
+}
+
+impl ActivityClass {
+    pub(super) const ALL: [Self; 3] = [Self::Interactive, Self::Subagent, Self::Automated];
+
+    const fn color(self) -> Color {
+        match self {
+            Self::Interactive => Color::LightBlue,
+            Self::Subagent => Color::LightMagenta,
+            Self::Automated => Color::LightYellow,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Palette {
     mode: ColorMode,
@@ -37,16 +58,37 @@ impl Palette {
     }
 
     pub(super) fn interactive(self) -> Style {
-        match self.mode {
-            ColorMode::Color => Style::default().fg(Color::LightBlue),
-            ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
-        }
+        self.activity(ActivityClass::Interactive)
+    }
+
+    pub(super) fn subagent(self) -> Style {
+        self.activity(ActivityClass::Subagent)
     }
 
     pub(super) fn automated(self) -> Style {
-        match self.mode {
-            ColorMode::Color => Style::default().fg(Color::LightYellow),
-            ColorMode::Monochrome => Style::default().add_modifier(Modifier::DIM),
+        self.activity(ActivityClass::Automated)
+    }
+
+    pub(super) fn activity(self, class: ActivityClass) -> Style {
+        match (self.mode, class) {
+            (ColorMode::Color, _) => Style::default().fg(class.color()),
+            (ColorMode::Monochrome, ActivityClass::Interactive) => {
+                Style::default().add_modifier(Modifier::BOLD)
+            }
+            (ColorMode::Monochrome, ActivityClass::Subagent) => Style::default(),
+            (ColorMode::Monochrome, ActivityClass::Automated) => {
+                Style::default().add_modifier(Modifier::DIM)
+            }
+        }
+    }
+
+    /// Monochrome terminals cannot tell classes apart by color, so each class gets its own
+    /// shade.
+    pub(super) fn activity_symbol(self, class: ActivityClass) -> &'static str {
+        match (self.mode, class) {
+            (ColorMode::Color, _) | (ColorMode::Monochrome, ActivityClass::Interactive) => "█",
+            (ColorMode::Monochrome, ActivityClass::Subagent) => "░",
+            (ColorMode::Monochrome, ActivityClass::Automated) => "▓",
         }
     }
 
@@ -68,6 +110,15 @@ impl Palette {
         }
     }
 
+    pub(super) fn summary_subagent(self) -> Style {
+        match self.mode {
+            ColorMode::Color => Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
+            ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
+        }
+    }
+
     pub(super) fn summary_automated(self) -> Style {
         match self.mode {
             ColorMode::Color => Style::default()
@@ -77,9 +128,9 @@ impl Palette {
         }
     }
 
-    pub(super) fn mixed_activity(self) -> Style {
+    pub(super) fn mixed_activity(self, lower: ActivityClass, upper: ActivityClass) -> Style {
         match self.mode {
-            ColorMode::Color => Style::default().fg(Color::LightBlue).bg(Color::LightYellow),
+            ColorMode::Color => Style::default().fg(lower.color()).bg(upper.color()),
             ColorMode::Monochrome => Style::default().add_modifier(Modifier::BOLD),
         }
     }

@@ -3,10 +3,10 @@ Date 2026-08-08 · Proj All · Agent All · Host All · Session All
 ┌ Summary ─────────────────────────────────────────────────────────────────────┐
 │Agents  ▲ 0 @ —                       │ Time  ● 0m  ○ 24h                     │
 │Work  ◷ 0 / $0.00                     │ Projects  0 · 0 models                │
-│Sessions  0 = 0 int + 0 auto · 0 unt                                          │
+│Sessions  0 = 0 int + 0 sub + 0 auto · 0 unt                                  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ┌ Concurrent agents ───────────────────────────────────────────────────────────┐
-│I Interactive  A Automated  · observed zero                                   │
+│I Interactive  S Subagent  A Automated  · observed zero                       │
 │0│············································································│
 │  00:00                              12:00                               00:00│
 └──────────────────────────────────────────────────────────────────────────────┘

@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 8,
   "report_id": "automated-report-id",
   "pricing": null,
   "projects": {
@@ -24,30 +24,50 @@
       "start": "2026-08-08T17:00:00Z",
       "end": "2026-08-08T17:15:00Z",
       "max_agents": 1,
+      "max_interactive_agents": 0,
+      "max_subagent_agents": 0,
+      "max_automated_agents": 1,
       "agent_minutes": 10.0,
       "output_tokens": 0,
       "cost": {
         "microdollars": 0
       },
       "automated_at_peak": 1,
-      "interactive_at_peak": 0
+      "interactive_at_peak": 0,
+      "subagent_at_peak": 0
     },
     {
       "start": "2026-08-08T17:15:00Z",
       "end": "2026-08-08T17:30:00Z",
       "max_agents": 0,
+      "max_interactive_agents": 0,
+      "max_subagent_agents": 0,
+      "max_automated_agents": 0,
       "agent_minutes": 0.0,
       "output_tokens": 0,
       "cost": {
         "microdollars": 0
       },
       "automated_at_peak": 0,
-      "interactive_at_peak": 0
+      "interactive_at_peak": 0,
+      "subagent_at_peak": 0
     }
   ],
   "peak": {
     "agents": 1,
     "at": "2026-08-08T17:05:00Z"
+  },
+  "interactive_peak": {
+    "agents": 0,
+    "at": null
+  },
+  "subagent_peak": {
+    "agents": 0,
+    "at": null
+  },
+  "automated_peak": {
+    "agents": 1,
+    "at": "2026-08-08T17:00:00Z"
   },
   "totals": {
     "active_minutes": 10.0,
@@ -63,14 +83,19 @@
     },
     "automated_agent_minutes": 10.0,
     "interactive_agent_minutes": 0.0,
+    "subagent_agent_minutes": 0.0,
     "automated_cost": {
       "microdollars": 2000000
     },
     "interactive_cost": {
       "microdollars": 0
     },
+    "subagent_cost": {
+      "microdollars": 0
+    },
     "automated_sessions": 1,
-    "interactive_sessions": 0
+    "interactive_sessions": 0,
+    "subagent_sessions": 0
   },
   "by_project": [
     {
@@ -82,10 +107,14 @@
       },
       "automated_agent_minutes": 10.0,
       "interactive_agent_minutes": 0.0,
+      "subagent_agent_minutes": 0.0,
       "automated_cost": {
         "microdollars": 2000000
       },
       "interactive_cost": {
+        "microdollars": 0
+      },
+      "subagent_cost": {
         "microdollars": 0
       }
     }
@@ -99,10 +128,14 @@
       },
       "automated_agent_minutes": 10.0,
       "interactive_agent_minutes": 0.0,
+      "subagent_agent_minutes": 0.0,
       "automated_cost": {
         "microdollars": 2000000
       },
       "interactive_cost": {
+        "microdollars": 0
+      },
+      "subagent_cost": {
         "microdollars": 0
       }
     }
@@ -116,10 +149,14 @@
       },
       "automated_agent_minutes": 10.0,
       "interactive_agent_minutes": 0.0,
+      "subagent_agent_minutes": 0.0,
       "automated_cost": {
         "microdollars": 2000000
       },
       "interactive_cost": {
+        "microdollars": 0
+      },
+      "subagent_cost": {
         "microdollars": 0
       }
     }
@@ -143,7 +180,8 @@
       "first_active": "2026-08-08T17:05:00Z",
       "last_active": "2026-08-08T17:15:00Z",
       "timing_quality": "timed",
-      "is_automated": true
+      "is_automated": true,
+      "is_subagent": false
     }
   ],
   "sessions_total": 1
