@@ -14,16 +14,12 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    herdr = {
-      url = "github:ogulcancelik/herdr/master";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     naersk = {
       url = "github:nix-community/naersk";
       inputs.fenix.follows = "fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
   };
 
   outputs =
@@ -31,7 +27,6 @@
       self,
       fenix,
       git-hooks,
-      herdr,
       naersk,
       nixpkgs,
     }:
@@ -57,7 +52,6 @@
             rustc = rustToolchain;
           };
           package = pkgs.callPackage ./nix/package.nix {
-            herdr = herdr.packages.${system}.default;
             inherit naerskLib;
           };
           hooks = import ./nix/hooks.nix {
